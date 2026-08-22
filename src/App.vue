@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import MapView from './MapView.vue'
 import ColumnView from './ColumnView.vue'
 import CpuExplainerModal from './CpuExplainerModal.vue'
+import DiskExplainerModal from './DiskExplainerModal.vue'
 
 const activeView = ref('map')
 </script>
@@ -26,6 +27,7 @@ const activeView = ref('map')
     <ColumnView v-else />
 
     <CpuExplainerModal />
+    <DiskExplainerModal />
   </div>
 </template>
 

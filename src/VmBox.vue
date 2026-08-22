@@ -2,10 +2,11 @@
 import { computed } from 'vue'
 import { metricsFor } from './spec.js'
 import { appFor } from './apps.js'
-import { partitionMetricFamilies } from './metrics.js'
+import { partitionMetricFamilies, groupDiskMetricsByDisk } from './metrics.js'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
+import DiskBadge from './DiskBadge.vue'
 
 const props = defineProps({
   vm: { type: Object, required: true },
@@ -18,9 +19,15 @@ const props = defineProps({
 const families = computed(() => partitionMetricFamilies(metricsFor(props.vm, 'vm')))
 const cpuMetrics = computed(() => families.value.cpuMetrics)
 const ramMetrics = computed(() => families.value.ramMetrics)
+const diskMetrics = computed(() => families.value.diskMetrics)
+const diskGroups = computed(() => groupDiskMetricsByDisk(diskMetrics.value))
 const otherMetrics = computed(() => families.value.otherMetrics)
 const hasMetrics = computed(
-  () => cpuMetrics.value.length || ramMetrics.value.length || otherMetrics.value.length
+  () =>
+    cpuMetrics.value.length ||
+    ramMetrics.value.length ||
+    diskMetrics.value.length ||
+    otherMetrics.value.length
 )
 </script>
 
@@ -37,6 +44,14 @@ const hasMetrics = computed(
       </div>
       <div v-if="ramMetrics.length" class="map-vm__metrics-row">
         <MemBadge :metrics="ramMetrics" :resource-id="vm.id" />
+      </div>
+      <div v-for="group in diskGroups" :key="'disk-' + group.disk" class="map-vm__metrics-row">
+        <DiskBadge
+          :metrics="group.metrics"
+          :disk="group.disk"
+          :multi-disk="diskGroups.length > 1"
+          :resource-id="vm.id"
+        />
       </div>
       <div v-for="metric in otherMetrics" :key="metric.type" class="map-vm__metrics-row">
         <MetricBadge :metric="metric" :resource-id="vm.id" />

@@ -51,12 +51,26 @@ export function buildTopologyEdges() {
 // entity's type (or that has no filter/filter.type at all, meaning it
 // applies everywhere). `entityType` is 'server' | 'vm' | 'container' |
 // 'external', matching stack.yaml's top-level section names singularized.
+//
+// A query containing `{{disk}}` (e.g. disk-busy/disk-pending) is expanded
+// once per device in the entity's own `disks: [vda, vdb]` list (defaulting
+// to just `vda`, the common single-disk case) rather than being resolved
+// to one metric — a VM's disks can have genuinely different roles (e.g.
+// data vs. WAL), so producing one metric per device lets callers show them
+// separately instead of conflating them. Each expanded copy carries a
+// `disk` field naming its device, for grouping/labeling downstream (see
+// metrics.js's `groupDiskMetricsByDisk`).
 export function metricsFor(entity, entityType) {
   const ownMetrics = entity.metrics || []
   const globalMetrics = spec.metrics.filter(
     (m) => !m.filter?.type || m.filter.type.includes(entityType)
   )
-  return [...ownMetrics, ...globalMetrics]
+  const expanded = globalMetrics.flatMap((m) => {
+    if (!m.query.includes('{{disk}}')) return [m]
+    const disks = entity.disks || ['vda']
+    return disks.map((disk) => ({ ...m, disk, query: m.query.replaceAll('{{disk}}', disk) }))
+  })
+  return [...ownMetrics, ...expanded]
 }
 
 export function buildTree() {

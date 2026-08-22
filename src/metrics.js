@@ -133,11 +133,11 @@ export async function fetchLatestMetric(metric, resourceId) {
   return fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId)
 }
 
-// `cpu-*` and `mem-*`/`swap-*` each render as one composite widget
-// (CpuBadge.vue / MemBadge.vue) rather than one badge per raw metric — this
-// splits a resource's full metrics list into those two families plus
-// everything else, so the caller can render each family once and hand
-// whatever's left to the generic per-metric badge.
+// `cpu-*`, `mem-*`/`swap-*`, and `disk-*` each render as one composite
+// widget (CpuBadge.vue / MemBadge.vue / DiskBadge.vue) rather than one
+// badge per raw metric — this splits a resource's full metrics list into
+// those families plus everything else, so the caller can render each
+// family once and hand whatever's left to the generic per-metric badge.
 const CPU_METRIC_TYPES = new Set(['cpu-busy', 'cpu-wait', 'cpu-steal'])
 const RAM_METRIC_TYPES = new Set([
   'mem-used',
@@ -149,14 +149,36 @@ const RAM_METRIC_TYPES = new Set([
   'swap-used',
   'swap-free',
 ])
+const DISK_METRIC_TYPES = new Set(['disk-busy', 'disk-pending'])
 
 export function partitionMetricFamilies(metrics) {
   const cpuMetrics = metrics.filter((m) => CPU_METRIC_TYPES.has(m.type))
   const ramMetrics = metrics.filter((m) => RAM_METRIC_TYPES.has(m.type))
+  const diskMetrics = metrics.filter((m) => DISK_METRIC_TYPES.has(m.type))
   const otherMetrics = metrics.filter(
-    (m) => !CPU_METRIC_TYPES.has(m.type) && !RAM_METRIC_TYPES.has(m.type)
+    (m) =>
+      !CPU_METRIC_TYPES.has(m.type) && !RAM_METRIC_TYPES.has(m.type) && !DISK_METRIC_TYPES.has(m.type)
   )
-  return { cpuMetrics, ramMetrics, otherMetrics }
+  return { cpuMetrics, ramMetrics, diskMetrics, otherMetrics }
+}
+
+// A VM with multiple disks (see stack.yaml's `disks:` field) has its
+// disk-busy/disk-pending metrics expanded once per device by spec.js's
+// metricsFor, each tagged with a `disk` field — this regroups them back by
+// device so each gets its own DiskBadge row instead of being shown as one
+// conflated family, since disks on the same VM can have very different
+// roles (e.g. data vs. WAL) that would be misleading to average together.
+// Sorted by device name for a stable, predictable row order.
+export function groupDiskMetricsByDisk(diskMetrics) {
+  const byDisk = new Map()
+  for (const m of diskMetrics) {
+    const disk = m.disk ?? 'vda'
+    if (!byDisk.has(disk)) byDisk.set(disk, [])
+    byDisk.get(disk).push(m)
+  }
+  return [...byDisk.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([disk, metrics]) => ({ disk, metrics }))
 }
 
 const WAIT_THRESHOLD = 10 // % — above this, treat as disk/network-bound, not just "busy"
@@ -250,6 +272,37 @@ export async function fetchRamMetrics(ramMetrics, resourceId) {
   }
 }
 
+const PENDING_THRESHOLD = 1 // queued ops — above this, requests are actually backing up,
+// not just an occasional single-op blip (healthy VMs sit at 0 essentially always)
+
+// `diskMetrics` is whatever subset of disk-busy/disk-pending this resource
+// actually has (from partitionMetricFamilies) — disk-pending is optional,
+// disk-busy is not.
+export async function fetchDiskMetrics(diskMetrics, resourceId) {
+  const byType = Object.fromEntries(diskMetrics.map((m) => [m.type, m]))
+  const busyMetric = byType['disk-busy']
+  if (!busyMetric) throw new Error('disk-busy metric not configured for this resource')
+
+  const [ioTime, pending] = await Promise.allSettled([
+    fetchLatestMetric(busyMetric, resourceId),
+    byType['disk-pending']
+      ? fetchLatestMetric(byType['disk-pending'], resourceId)
+      : Promise.reject(new Error('disk-pending not configured')),
+  ])
+
+  if (ioTime.status !== 'fulfilled') {
+    throw new Error(ioTime.reason instanceof Error ? ioTime.reason.message : String(ioTime.reason))
+  }
+
+  // disk_io_time.io_time is collectd's ms-of-I/O-per-second rate (0-1000),
+  // i.e. the same thing `iostat %util` shows — divide by 10 for 0-100%.
+  return {
+    busy: ioTime.value.value / 10,
+    pending: pending.status === 'fulfilled' ? pending.value.value : null,
+    pendingElevated: pending.status === 'fulfilled' && pending.value.value > PENDING_THRESHOLD,
+  }
+}
+
 // Binary GiB (1024^3), matching how collectd/the kernel actually count RAM
 // (what tools like `free`/`htop` show, even though they usually label it
 // "GB") — not decimal/SI gigabytes.
@@ -280,10 +333,25 @@ const RAM_BUSY_TIERS = [
   { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
 ]
 
+// Disk saturation causes immediate queueing/latency, same shape as CPU
+// (not RAM's forgiving-until-the-cliff curve), so it shares CPU's
+// thresholds rather than RAM's — kept as its own tier list, not a shared
+// reference, so the two can be tuned independently later if warranted.
+const DISK_BUSY_TIERS = [
+  { max: 50, plain: true }, // healthy
+  { max: 75, color: '#854d0e', background: '#fef9c3' }, // yellow
+  { max: 90, color: '#9a3412', background: '#ffedd5' }, // orange
+  { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
+]
+
 export function cpuBusyColor(busyPercent) {
   return CPU_BUSY_TIERS.find((tier) => busyPercent < tier.max) ?? CPU_BUSY_TIERS.at(-1)
 }
 
 export function ramBusyColor(busyPercent) {
   return RAM_BUSY_TIERS.find((tier) => busyPercent < tier.max) ?? RAM_BUSY_TIERS.at(-1)
+}
+
+export function diskBusyColor(busyPercent) {
+  return DISK_BUSY_TIERS.find((tier) => busyPercent < tier.max) ?? DISK_BUSY_TIERS.at(-1)
 }

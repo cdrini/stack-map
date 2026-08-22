@@ -4,7 +4,7 @@
 // without the rendering/pan-zoom concerns.
 
 import { buildTopologyEdges, metricsFor } from './spec.js'
-import { partitionMetricFamilies } from './metrics.js'
+import { partitionMetricFamilies, groupDiskMetricsByDisk } from './metrics.js'
 import { EXTERNAL_NODE_WIDTH, EXTERNAL_NODE_HEIGHT } from './externalLayout.js'
 
 const CONTAINER_W = 150
@@ -23,9 +23,19 @@ const MAX_ROW_WIDTH = 1500
 // One row per metric "family" actually present — cpu-*/mem-* each collapse
 // into a single composite badge, so they only cost one row each regardless
 // of how many raw metrics back them; anything ungrouped gets its own row.
+// disk-* is the one family that can cost more than one row: a VM with
+// several disks (stack.yaml's `disks:` field) gets one DiskBadge row per
+// device, since they're rendered separately rather than averaged.
 function countMetricRows(vm) {
-  const { cpuMetrics, ramMetrics, otherMetrics } = partitionMetricFamilies(metricsFor(vm, 'vm'))
-  return (cpuMetrics.length ? 1 : 0) + (ramMetrics.length ? 1 : 0) + otherMetrics.length
+  const { cpuMetrics, ramMetrics, diskMetrics, otherMetrics } = partitionMetricFamilies(
+    metricsFor(vm, 'vm')
+  )
+  return (
+    (cpuMetrics.length ? 1 : 0) +
+    (ramMetrics.length ? 1 : 0) +
+    groupDiskMetricsByDisk(diskMetrics).length +
+    otherMetrics.length
+  )
 }
 
 function layoutVm(vm) {
