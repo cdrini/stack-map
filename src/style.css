@@ -1,0 +1,15 @@
+:root {
+  /* This app only has a light design so far — "light dark" here would let
+     browsers auto-apply dark-mode form control colors (e.g. white button
+     text) against our explicitly light backgrounds. */
+  color-scheme: light;
+  font: 16px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+#app {
+  min-height: 100svh;
+}
