@@ -9,7 +9,7 @@
 // nothing and has every server in rotation).
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { haproxySessionsColor, fetchHaproxyMetrics, resolveMetricQuery } from './metrics.js'
+import { haproxySessionsColor, isHaproxySessionsCritical, fetchHaproxyMetrics, resolveMetricQuery } from './metrics.js'
 import { refreshTick } from './liveRefresh.js'
 
 const props = defineProps({
@@ -18,7 +18,7 @@ const props = defineProps({
   backend: { type: String, required: true },
 })
 
-const emit = defineEmits(['settled'])
+const emit = defineEmits(['settled', 'critical-change'])
 
 const sessionsMetric = computed(() => props.metrics.find((m) => m.type === 'haproxy-sessions'))
 
@@ -33,6 +33,11 @@ const healthDegraded = ref(false)
 const errorMessage = ref('')
 
 const color = computed(() => (busy.value !== null ? haproxySessionsColor(busy.value) : null))
+// A backend server being pulled from rotation renders in the same red as
+// the top sessions tier (see the template's __chip--error), so it counts
+// as critical too — a downed server is at least as urgent as high load.
+const critical = computed(() => (busy.value !== null && isHaproxySessionsCritical(busy.value)) || healthDegraded.value)
+watch(critical, (val) => emit('critical-change', val), { immediate: true })
 
 // See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
 // settle, so the parent VmBox can correct a pre-data measurement.

@@ -455,3 +455,25 @@ export function diskBusyColor(busyPercent) {
 export function haproxySessionsColor(busyPercent) {
   return HAPROXY_SESSIONS_TIERS.find((tier) => busyPercent < tier.max) ?? HAPROXY_SESSIONS_TIERS.at(-1)
 }
+
+// Whether a badge is showing the worst (red) tier of its own busy-%
+// curve — checked by identity against that curve's own last entry rather
+// than a re-typed threshold, so there's exactly one place (the tier list
+// above) that defines what "red" means for each metric. Used to flag a
+// VM's whole box border when any metric on it has gone critical, not just
+// to color the individual chip.
+export function isCpuBusyCritical(busyPercent) {
+  return cpuBusyColor(busyPercent) === CPU_BUSY_TIERS.at(-1)
+}
+
+export function isRamBusyCritical(busyPercent) {
+  return ramBusyColor(busyPercent) === RAM_BUSY_TIERS.at(-1)
+}
+
+export function isDiskBusyCritical(busyPercent) {
+  return diskBusyColor(busyPercent) === DISK_BUSY_TIERS.at(-1)
+}
+
+export function isHaproxySessionsCritical(busyPercent) {
+  return haproxySessionsColor(busyPercent) === HAPROXY_SESSIONS_TIERS.at(-1)
+}

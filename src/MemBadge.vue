@@ -8,7 +8,7 @@
 // exhaustion rather than just "somewhat full."
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { ramBusyColor, fetchRamMetrics, formatGiB } from './metrics.js'
+import { ramBusyColor, isRamBusyCritical, fetchRamMetrics, formatGiB } from './metrics.js'
 import { refreshTick } from './liveRefresh.js'
 
 const props = defineProps({
@@ -16,7 +16,7 @@ const props = defineProps({
   resourceId: { type: String, required: true },
 })
 
-const emit = defineEmits(['settled'])
+const emit = defineEmits(['settled', 'critical-change'])
 
 const status = ref('loading') // 'loading' | 'ok' | 'error'
 const busy = ref(null)
@@ -27,6 +27,8 @@ const swapElevated = ref(false)
 const errorMessage = ref('')
 
 const color = computed(() => (busy.value !== null ? ramBusyColor(busy.value) : null))
+const critical = computed(() => busy.value !== null && isRamBusyCritical(busy.value))
+watch(critical, (val) => emit('critical-change', val), { immediate: true })
 
 // See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
 // settle, so the parent VmBox can correct a pre-data measurement.

@@ -77,6 +77,22 @@ function onBadgeSettled() {
 }
 onMounted(checkAllSettled) // handles the zero-badges case, where nothing else would ever call this
 
+// Tracks which badges (by a stable per-badge key) currently consider
+// themselves critical (see each badge's own `critical` computed) — a Map
+// rather than a plain count so a badge flipping back to healthy on a later
+// refresh correctly removes its own entry instead of just decrementing a
+// counter that some other badge might also be incrementing at the same
+// time. Reassigned (not mutated) on each update, same pattern as
+// MapView.vue's measuredSizes, since a plain ref doesn't track Map mutation.
+const criticalStatuses = ref(new Map())
+function setCritical(key, isCritical) {
+  const next = new Map(criticalStatuses.value)
+  if (isCritical) next.set(key, true)
+  else next.delete(key)
+  criticalStatuses.value = next
+}
+const hasCriticalMetric = computed(() => criticalStatuses.value.size > 0)
+
 const rootEl = ref(null)
 const containerEls = {}
 function setContainerEl(id, el) {
@@ -109,7 +125,12 @@ defineExpose({ measure })
 </script>
 
 <template>
-  <div ref="rootEl" class="map-vm" :style="{ left: x + 'px', top: y + 'px' }">
+  <div
+    ref="rootEl"
+    class="map-vm"
+    :class="{ 'map-vm--critical': hasCriticalMetric }"
+    :style="{ left: x + 'px', top: y + 'px' }"
+  >
     <div class="map-vm__header">
       <span class="map-vm__name">{{ vm.id }}</span>
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
@@ -117,10 +138,20 @@ defineExpose({ measure })
 
     <div v-if="hasMetrics" class="map-vm__metrics">
       <div v-if="cpuMetrics.length" class="map-vm__metrics-row">
-        <CpuBadge :metrics="cpuMetrics" :resource-id="vm.id" @settled="onBadgeSettled" />
+        <CpuBadge
+          :metrics="cpuMetrics"
+          :resource-id="vm.id"
+          @settled="onBadgeSettled"
+          @critical-change="(v) => setCritical('cpu', v)"
+        />
       </div>
       <div v-if="ramMetrics.length" class="map-vm__metrics-row">
-        <MemBadge :metrics="ramMetrics" :resource-id="vm.id" @settled="onBadgeSettled" />
+        <MemBadge
+          :metrics="ramMetrics"
+          :resource-id="vm.id"
+          @settled="onBadgeSettled"
+          @critical-change="(v) => setCritical('ram', v)"
+        />
       </div>
       <div v-for="group in diskGroups" :key="'disk-' + group.disk" class="map-vm__metrics-row">
         <DiskBadge
@@ -129,6 +160,7 @@ defineExpose({ measure })
           :multi-disk="diskGroups.length > 1"
           :resource-id="vm.id"
           @settled="onBadgeSettled"
+          @critical-change="(v) => setCritical('disk:' + group.disk, v)"
         />
       </div>
       <div v-for="metric in otherMetrics" :key="metric.type" class="map-vm__metrics-row">
@@ -157,7 +189,13 @@ defineExpose({ measure })
         </div>
         <div v-if="haproxyGroupsByContainer[c.id].length" class="map-container__backends">
           <div v-for="group in haproxyGroupsByContainer[c.id]" :key="'haproxy-' + group.backend" class="map-container__backend">
-            <HaproxyBadge :metrics="group.metrics" :backend="group.backend" :resource-id="c.id" @settled="onBadgeSettled" />
+            <HaproxyBadge
+              :metrics="group.metrics"
+              :backend="group.backend"
+              :resource-id="c.id"
+              @settled="onBadgeSettled"
+              @critical-change="(v) => setCritical('haproxy:' + c.id + ':' + group.backend, v)"
+            />
           </div>
         </div>
       </div>
@@ -175,6 +213,13 @@ defineExpose({ measure })
   border-radius: 7px;
   box-sizing: border-box;
   padding: 4px 6px;
+}
+
+/* Matches the red used by every badge's own top tier / error chip — any
+   metric on this VM (or on one of its containers) currently reading that
+   red is worth noticing from a glance at the whole map, not just up close. */
+.map-vm--critical {
+  border: 2px solid #b91c1c;
 }
 
 .map-vm__header {

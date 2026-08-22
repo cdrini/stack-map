@@ -8,7 +8,7 @@
 // strain isn't purely compute-bound.
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { cpuBusyColor, fetchCpuMetrics, resolveMetricQuery } from './metrics.js'
+import { cpuBusyColor, isCpuBusyCritical, fetchCpuMetrics, resolveMetricQuery } from './metrics.js'
 import { refreshTick } from './liveRefresh.js'
 import { openCpuExplainer } from './cpuExplainer.js'
 
@@ -17,7 +17,7 @@ const props = defineProps({
   resourceId: { type: String, required: true },
 })
 
-const emit = defineEmits(['settled'])
+const emit = defineEmits(['settled', 'critical-change'])
 
 const busyMetric = computed(() => props.metrics.find((m) => m.type === 'cpu-busy'))
 
@@ -30,6 +30,10 @@ const stealElevated = ref(false)
 const errorMessage = ref('')
 
 const color = computed(() => (busy.value !== null ? cpuBusyColor(busy.value) : null))
+const critical = computed(() => busy.value !== null && isCpuBusyCritical(busy.value))
+// `immediate` reports the initial (non-critical) state right away, so the
+// parent VM box doesn't have to assume "not critical yet" on its own.
+watch(critical, (val) => emit('critical-change', val), { immediate: true })
 
 // Fired once, after this badge's first fetch settles (success or failure)
 // — regardless of live-data status — so the parent VmBox can tell when a

@@ -9,7 +9,7 @@
 // occasional blip.
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { diskBusyColor, fetchDiskMetrics, resolveMetricQuery } from './metrics.js'
+import { diskBusyColor, isDiskBusyCritical, fetchDiskMetrics, resolveMetricQuery } from './metrics.js'
 import { refreshTick } from './liveRefresh.js'
 import { openDiskExplainer } from './diskExplainer.js'
 
@@ -23,7 +23,7 @@ const props = defineProps({
   multiDisk: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['settled'])
+const emit = defineEmits(['settled', 'critical-change'])
 
 const busyMetric = computed(() => props.metrics.find((m) => m.type === 'disk-busy'))
 const label = computed(() => (props.multiDisk ? `DISK ${props.disk}:` : 'DISK:'))
@@ -35,6 +35,8 @@ const pendingElevated = ref(false)
 const errorMessage = ref('')
 
 const color = computed(() => (busy.value !== null ? diskBusyColor(busy.value) : null))
+const critical = computed(() => busy.value !== null && isDiskBusyCritical(busy.value))
+watch(critical, (val) => emit('critical-change', val), { immediate: true })
 
 // See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
 // settle, so the parent VmBox can correct a pre-data measurement.
