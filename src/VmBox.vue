@@ -155,12 +155,8 @@ defineExpose({ measure })
           <span v-else class="map-container__dot" />
           <span class="map-container__label">{{ c.image }}</span>
         </div>
-        <div v-if="haproxyGroupsByContainer[c.id].length" class="map-container__metrics">
-          <div
-            v-for="group in haproxyGroupsByContainer[c.id]"
-            :key="'haproxy-' + group.backend"
-            class="map-container__metrics-row"
-          >
+        <div v-if="haproxyGroupsByContainer[c.id].length" class="map-container__backends">
+          <div v-for="group in haproxyGroupsByContainer[c.id]" :key="'haproxy-' + group.backend" class="map-container__backend">
             <HaproxyBadge :metrics="group.metrics" :backend="group.backend" :resource-id="c.id" @settled="onBadgeSettled" />
           </div>
         </div>
@@ -238,7 +234,7 @@ defineExpose({ measure })
 }
 
 /* A plain container (no metrics) is just its __header row, so it still
-   renders at the same fixed 20px it always has — __metrics only adds
+   renders at the same fixed 20px it always has — __backends only adds
    height for containers that actually have something to show (currently
    just haproxy-fronting ones). */
 .map-container {
@@ -260,18 +256,22 @@ defineExpose({ measure })
   height: 20px;
 }
 
-.map-container__metrics {
+.map-container__backends {
   display: flex;
   flex-direction: column;
+  gap: 3px;
   padding-bottom: 3px;
 }
 
-.map-container__metrics-row {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  height: 14px;
-  overflow: hidden;
+/* Each backend a container fronts gets its own bordered sub-rectangle —
+   same visual language as a container sitting inside its VM — rather than
+   being just another row, since a backend is its own distinct thing (a
+   haproxy container can front several) with its own set of stats. */
+.map-container__backend {
+  border: 1px solid #dbe3ea;
+  border-radius: 4px;
+  background: #fff;
+  padding: 2px 4px;
 }
 
 .map-container__dot {
