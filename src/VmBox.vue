@@ -16,9 +16,9 @@ defineProps({
   <div class="map-vm" :style="{ left: x + 'px', top: y + 'px', width: width + 'px', height: height + 'px' }">
     <div class="map-vm__header">
       <span class="map-vm__name">{{ vm.id }}</span>
-      <!-- Hardcoded to one VM for now — testing whether Graphite is
-           fetchable client-side at all before building this out properly. -->
-      <CpuMonitor v-if="vm.id === 'ol-web0'" target="collectd.ol-web0_us_archive_org.load.load.shortterm" />
+      <!-- Hardcoded to one VM for now — testing the FastAPI proxy before
+           building this out for every VM. -->
+      <CpuMonitor v-if="vm.id === 'ol-web0'" vm-id="ol-web0" />
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
 

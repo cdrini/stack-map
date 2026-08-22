@@ -7,10 +7,14 @@ occupancy, etc.) so slowness is visible at the level it's actually happening.
 
 ## Status
 
-v1: static topology only, rendered from a hand-authored spec. No live metrics
-wiring yet — that's a deliberate follow-up once the topology layout and spec
-format hold up, and will likely need a small backend proxy in front of
-Graphite/Grafana (to avoid doing auth/CORS from the browser).
+Topology (servers/VMs/containers/relationships) is rendered from a
+hand-authored spec. Live metrics are just starting: Graphite's `/render`
+endpoint has no `Access-Control-Allow-Origin` header, so the browser can't
+`fetch()` it directly (confirmed — it's reachable, just not CORS-enabled), so
+`server/` is a small FastAPI proxy that makes that request server-side
+instead. Currently wired up for exactly one metric on one VM
+(`CpuMonitor.vue`, hardcoded to `ol-web0`'s load average) as a proof of
+concept before rolling it out to every VM.
 
 ## Spec format
 
@@ -32,3 +36,16 @@ current.
 npm install
 npm run dev -- --host 0.0.0.0
 ```
+
+## Metrics API (server/)
+
+FastAPI proxy in front of Graphite, so the browser talks to this instead of
+Graphite directly:
+
+```sh
+cd server
+uv run uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+`GET /api/vms/{vm_id}/load` → latest 1-minute load average for that VM, e.g.
+`/api/vms/ol-web0/load`.
