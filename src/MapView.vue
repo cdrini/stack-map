@@ -8,8 +8,8 @@ import {
   computeFlatMapLayout,
   flattenLayout,
   flattenFlatLayout,
-  rightMidPoint,
-  leftMidPoint,
+  rightSidePoints,
+  leftSidePoints,
 } from './mapLayout.js'
 import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
@@ -126,7 +126,7 @@ const renderedEdges = computed(() => {
       boxes.set(ep.external.id, { x: ep.x, y: ep.y, width: ep.width, height: ep.height })
     }
   }
-  const edges = []
+  const validEdges = []
   for (const edge of buildEdges()) {
     const fromBox = boxes.get(edge.from)
     const toBox = boxes.get(edge.to)
@@ -134,8 +134,41 @@ const renderedEdges = computed(() => {
       console.warn(`stack-map: relationship references unknown id`, edge)
       continue
     }
-    const p1 = rightMidPoint(fromBox)
-    const p2 = leftMidPoint(toBox)
+    validEdges.push({ ...edge, fromBox, toBox })
+  }
+
+  // When several edges leave the same box's right side (one source with
+  // multiple relationships) or arrive at the same box's left side (several
+  // sources pointing at one target), fan them out along that side instead
+  // of bunching them all at the midpoint — grouped separately per side,
+  // since a box's outgoing and incoming counts are independent. Ordered by
+  // the OTHER endpoint's vertical position so the fanned points line up
+  // with what they connect to instead of crossing needlessly right at the
+  // shared box.
+  function groupEdgesBy(keyFn, sortKeyFn) {
+    const groups = new Map()
+    for (const edge of validEdges) {
+      if (!groups.has(keyFn(edge))) groups.set(keyFn(edge), [])
+      groups.get(keyFn(edge)).push(edge)
+    }
+    for (const group of groups.values()) group.sort((a, b) => sortKeyFn(a) - sortKeyFn(b))
+    return groups
+  }
+  const fromGroups = groupEdgesBy(
+    (e) => e.from,
+    (e) => e.toBox.y
+  )
+  const toGroups = groupEdgesBy(
+    (e) => e.to,
+    (e) => e.fromBox.y
+  )
+
+  const edges = []
+  for (const edge of validEdges) {
+    const fromGroup = fromGroups.get(edge.from)
+    const toGroup = toGroups.get(edge.to)
+    const p1 = rightSidePoints(edge.fromBox, fromGroup.length)[fromGroup.indexOf(edge)]
+    const p2 = leftSidePoints(edge.toBox, toGroup.length)[toGroup.indexOf(edge)]
 
     // Control points sit level with each endpoint (same y), so the curve
     // leaves the source heading straight right and arrives at the target

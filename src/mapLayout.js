@@ -20,6 +20,7 @@ const VM_GAP = 8
 const SERVER_PADDING = 14
 const SERVER_HEADER = 32
 const SERVER_GAP = 28
+const COLUMN_GAP = 84 // horizontal gap between topological columns in the flat (ungrouped) map view
 const MAX_ROW_WIDTH = 1500
 
 function layoutVm(vm, measured) {
@@ -455,9 +456,9 @@ export function computeFlatMapLayout(tree, externals = [], measuredSizes) {
     for (const l of layerKeys) {
       const width = Math.max(...order.get(l).map((id) => dimsById.get(id).width))
       colX.set(l, x)
-      x += width + SERVER_GAP
+      x += width + COLUMN_GAP
     }
-    topoWidth = Math.max(topoWidth, x - SERVER_GAP)
+    topoWidth = Math.max(topoWidth, x - COLUMN_GAP)
 
     const centerY = positionForAlignment(order, layerKeys, dimsById, neighborsOf, VM_GAP)
     compactGaps(order, layerKeys, dimsById, neighborsOf, centerY, VM_GAP)
@@ -548,10 +549,25 @@ export function flattenFlatLayout(layout) {
 // wherever a ray to the other box's center happens to exit, keeps arrows
 // visually consistent instead of poking out of arbitrary sides depending
 // on how two boxes happen to be vertically offset from each other.
-export function rightMidPoint(box) {
-  return { x: box.x + box.width, y: box.y + box.height / 2 }
+//
+// When several edges share a side of the same box, `count` fans them out
+// evenly across it instead of bunching them all at the midpoint: dividing
+// the height into count+1 equal segments and placing a point at each
+// internal boundary keeps them symmetric around the center and off the
+// corners, for any count — count=1 lands exactly on the midpoint, same as
+// before.
+function distributeAlongSide(box, count, xForSide) {
+  const points = []
+  for (let i = 0; i < count; i++) {
+    points.push({ x: xForSide(box), y: box.y + (box.height * (i + 1)) / (count + 1) })
+  }
+  return points
 }
 
-export function leftMidPoint(box) {
-  return { x: box.x, y: box.y + box.height / 2 }
+export function rightSidePoints(box, count) {
+  return distributeAlongSide(box, count, (b) => b.x + b.width)
+}
+
+export function leftSidePoints(box, count) {
+  return distributeAlongSide(box, count, (b) => b.x)
 }
