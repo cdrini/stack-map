@@ -2,6 +2,11 @@ import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
 
 const API_BASE = 'http://localhost:8000'
 
+// haproxy-* metrics are Prometheus-backed rather than Graphite-backed —
+// this is the one thing that decides which backend endpoint a chunk of
+// same-source queries goes to (see fetchChunk).
+const PROMETHEUS_SOURCE = 'http://ux-log0.us.archive.org:9090'
+
 // Substitutes `{{id}}` in a metric's `query` template with the id of
 // whatever entity it's attached to — see the `metrics` doc comment at the
 // top of stack.yaml.
@@ -93,8 +98,9 @@ async function fetchChunk(source, items) {
   const params = new URLSearchParams({ source })
   for (const item of items) params.append('query', item.query)
 
+  const endpoint = source === PROMETHEUS_SOURCE ? '/api/metrics/prometheus/latest' : '/api/metrics/latest'
   try {
-    const res = await fetch(`${API_BASE}/api/metrics/latest?${params}`)
+    const res = await fetch(`${API_BASE}${endpoint}?${params}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     for (const item of items) {
@@ -150,16 +156,27 @@ const RAM_METRIC_TYPES = new Set([
   'swap-free',
 ])
 const DISK_METRIC_TYPES = new Set(['disk-busy', 'disk-pending'])
+const HAPROXY_METRIC_TYPES = new Set([
+  'haproxy-sessions',
+  'haproxy-limit',
+  'haproxy-queue',
+  'haproxy-up',
+  'haproxy-total',
+])
 
 export function partitionMetricFamilies(metrics) {
   const cpuMetrics = metrics.filter((m) => CPU_METRIC_TYPES.has(m.type))
   const ramMetrics = metrics.filter((m) => RAM_METRIC_TYPES.has(m.type))
   const diskMetrics = metrics.filter((m) => DISK_METRIC_TYPES.has(m.type))
+  const haproxyMetrics = metrics.filter((m) => HAPROXY_METRIC_TYPES.has(m.type))
   const otherMetrics = metrics.filter(
     (m) =>
-      !CPU_METRIC_TYPES.has(m.type) && !RAM_METRIC_TYPES.has(m.type) && !DISK_METRIC_TYPES.has(m.type)
+      !CPU_METRIC_TYPES.has(m.type) &&
+      !RAM_METRIC_TYPES.has(m.type) &&
+      !DISK_METRIC_TYPES.has(m.type) &&
+      !HAPROXY_METRIC_TYPES.has(m.type)
   )
-  return { cpuMetrics, ramMetrics, diskMetrics, otherMetrics }
+  return { cpuMetrics, ramMetrics, diskMetrics, haproxyMetrics, otherMetrics }
 }
 
 // A VM with multiple disks (see stack.yaml's `disks:` field) has its
@@ -179,6 +196,21 @@ export function groupDiskMetricsByDisk(diskMetrics) {
   return [...byDisk.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([disk, metrics]) => ({ disk, metrics }))
+}
+
+// Same idea as groupDiskMetricsByDisk, for haproxy containers that front
+// more than one backend pool (see stack.yaml's doc comment on `backend`) —
+// groups this container's haproxy-* metrics back by backend so each pool
+// gets its own HaproxyBadge row. Sorted by backend name for a stable order.
+export function groupHaproxyMetricsByBackend(haproxyMetrics) {
+  const byBackend = new Map()
+  for (const m of haproxyMetrics) {
+    if (!byBackend.has(m.backend)) byBackend.set(m.backend, [])
+    byBackend.get(m.backend).push(m)
+  }
+  return [...byBackend.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([backend, metrics]) => ({ backend, metrics }))
 }
 
 const WAIT_THRESHOLD = 10 // % — above this, treat as disk/network-bound, not just "busy"
@@ -303,6 +335,58 @@ export async function fetchDiskMetrics(diskMetrics, resourceId) {
   }
 }
 
+// queued requests — above this, the backend can't keep up with demand right
+// now (healthy backends sit at 0 essentially always, same role as
+// disk-pending)
+const QUEUE_THRESHOLD = 0
+
+// `haproxyMetrics` is whatever subset of haproxy-sessions/-limit/-queue/-up/
+// -total this backend actually has (from groupHaproxyMetricsByBackend) —
+// sessions and limit are required (they're what busy % is computed from);
+// queue/up/total are optional.
+export async function fetchHaproxyMetrics(haproxyMetrics, resourceId) {
+  const byType = Object.fromEntries(haproxyMetrics.map((m) => [m.type, m]))
+  const sessionsMetric = byType['haproxy-sessions']
+  const limitMetric = byType['haproxy-limit']
+  if (!sessionsMetric || !limitMetric) {
+    throw new Error('haproxy-sessions/haproxy-limit not configured for this backend')
+  }
+
+  const [sessions, limit, queue, up, total] = await Promise.allSettled([
+    fetchLatestMetric(sessionsMetric, resourceId),
+    fetchLatestMetric(limitMetric, resourceId),
+    byType['haproxy-queue']
+      ? fetchLatestMetric(byType['haproxy-queue'], resourceId)
+      : Promise.reject(new Error('haproxy-queue not configured')),
+    byType['haproxy-up']
+      ? fetchLatestMetric(byType['haproxy-up'], resourceId)
+      : Promise.reject(new Error('haproxy-up not configured')),
+    byType['haproxy-total']
+      ? fetchLatestMetric(byType['haproxy-total'], resourceId)
+      : Promise.reject(new Error('haproxy-total not configured')),
+  ])
+
+  if (sessions.status !== 'fulfilled' || limit.status !== 'fulfilled') {
+    const failed = sessions.status !== 'fulfilled' ? sessions : limit
+    throw new Error(failed.reason instanceof Error ? failed.reason.message : String(failed.reason))
+  }
+
+  const upCount = up.status === 'fulfilled' ? up.value.value : null
+  const totalCount = total.status === 'fulfilled' ? total.value.value : null
+
+  return {
+    busy: (sessions.value.value / limit.value.value) * 100,
+    sessions: sessions.value.value,
+    queue: queue.status === 'fulfilled' ? queue.value.value : null,
+    queueElevated: queue.status === 'fulfilled' && queue.value.value > QUEUE_THRESHOLD,
+    up: upCount,
+    total: totalCount,
+    // Only flagged once both numbers are actually known — a missing metric
+    // shouldn't read as "servers are down".
+    healthDegraded: upCount !== null && totalCount !== null && upCount < totalCount,
+  }
+}
+
 // Binary GiB (1024^3), matching how collectd/the kernel actually count RAM
 // (what tools like `free`/`htop` show, even though they usually label it
 // "GB") — not decimal/SI gigabytes.
@@ -344,6 +428,18 @@ const DISK_BUSY_TIERS = [
   { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
 ]
 
+// Unverified first guess, not empirically tuned like the others — sessions
+// vs. a configured limit is a saturation signal much like disk busy %, but
+// we haven't yet seen what "normal" looks like in practice for these
+// specific backends. Worth revisiting once this badge has been watched for
+// a while.
+const HAPROXY_SESSIONS_TIERS = [
+  { max: 50, plain: true }, // healthy
+  { max: 75, color: '#854d0e', background: '#fef9c3' }, // yellow
+  { max: 90, color: '#9a3412', background: '#ffedd5' }, // orange
+  { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
+]
+
 export function cpuBusyColor(busyPercent) {
   return CPU_BUSY_TIERS.find((tier) => busyPercent < tier.max) ?? CPU_BUSY_TIERS.at(-1)
 }
@@ -354,4 +450,8 @@ export function ramBusyColor(busyPercent) {
 
 export function diskBusyColor(busyPercent) {
   return DISK_BUSY_TIERS.find((tier) => busyPercent < tier.max) ?? DISK_BUSY_TIERS.at(-1)
+}
+
+export function haproxySessionsColor(busyPercent) {
+  return HAPROXY_SESSIONS_TIERS.find((tier) => busyPercent < tier.max) ?? HAPROXY_SESSIONS_TIERS.at(-1)
 }

@@ -1,16 +1,21 @@
-"""Metrics API for stack-map: proxies Graphite so the browser doesn't have to.
+"""Metrics API for stack-map: proxies Graphite and Prometheus so the browser
+doesn't have to.
 
 Graphite's /render endpoint has no Access-Control-Allow-Origin header, so a
 direct browser fetch() gets blocked by CORS even though the server itself is
 reachable (confirmed via curl). This makes the request server-side instead,
 where CORS doesn't apply, and re-exposes it with CORS enabled for the
-frontend dev server.
+frontend dev server. Prometheus (used for haproxy metrics) gets the same
+treatment, plus a local-dev override — see PROMETHEUS_URL_OVERRIDE below.
 
 Generic over any entity's `metrics: [{ type, source, query }]` in
-stack.yaml — the frontend resolves `{{id}}` in `query` itself and passes the
-result straight through, so this proxy doesn't need to know about VMs,
-metric types, or the templating at all.
+stack.yaml — the frontend resolves `{{id}}`/`{{disk}}` in `query` itself and
+passes the result straight through, so this proxy doesn't need to know about
+VMs, metric types, or the templating at all.
 """
+
+import asyncio
+import os
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -31,6 +36,19 @@ app.add_middleware(
 # every request — an allowlist keeps this from doubling as an open proxy to
 # an arbitrary URL if that ever changed.
 ALLOWED_SOURCES = {"http://graphite0-web.us.archive.org/render"}
+
+PROMETHEUS_SOURCES = {"http://ux-log0.us.archive.org:9090"}
+
+# stack.yaml always names the real production Prometheus — it's only
+# reachable from Archive's internal network, not from a developer's own
+# sandbox/laptop. Set this env var to redirect requests there to a local
+# tunnel instead (e.g. an SSH port-forward exposed to this process), without
+# having to point stack.yaml itself at a URL that wouldn't work in prod:
+#   STACKMAP_PROMETHEUS_URL_OVERRIDE=http://host.docker.internal:19090
+# Only the request target changes — `source` from the client still has to
+# match PROMETHEUS_SOURCES above, so this can't be used to reach anywhere
+# else.
+PROMETHEUS_URL_OVERRIDE = os.environ.get("STACKMAP_PROMETHEUS_URL_OVERRIDE")
 
 
 @app.get("/api/metrics/latest")
@@ -68,3 +86,35 @@ async def metrics_latest(source: str, query: list[str] = Query(...)):
         result[q] = {"value": latest[0], "timestamp": latest[1]} if latest else None
 
     return result
+
+
+async def _fetch_prometheus_one(client: httpx.AsyncClient, base: str, query: str):
+    try:
+        response = await client.get(f"{base}/api/v1/query", params={"query": query})
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"metrics source request failed: {e}")
+
+    series = response.json()["data"]["result"]
+    if not series:
+        return query, None
+    timestamp, value = series[0]["value"]
+    return query, {"value": float(value), "timestamp": timestamp}
+
+
+@app.get("/api/metrics/prometheus/latest")
+async def prometheus_metrics_latest(source: str, query: list[str] = Query(...)):
+    """Same contract as /api/metrics/latest, but for Prometheus's instant
+    query API — one request per query (Prometheus has no equivalent of
+    Graphite's repeated-target batching), fired concurrently so an N-query
+    batch still costs one round trip's worth of wall-clock time rather than
+    N sequential ones.
+    """
+    if source not in PROMETHEUS_SOURCES:
+        raise HTTPException(status_code=400, detail=f"source not allowed: {source}")
+
+    base = PROMETHEUS_URL_OVERRIDE or source
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        results = await asyncio.gather(*(_fetch_prometheus_one(client, base, q) for q in query))
+
+    return dict(results)

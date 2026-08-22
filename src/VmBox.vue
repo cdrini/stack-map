@@ -2,11 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { metricsFor } from './spec.js'
 import { appFor } from './apps.js'
-import { partitionMetricFamilies, groupDiskMetricsByDisk } from './metrics.js'
+import { partitionMetricFamilies, groupDiskMetricsByDisk, groupHaproxyMetricsByBackend } from './metrics.js'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
 import DiskBadge from './DiskBadge.vue'
+import HaproxyBadge from './HaproxyBadge.vue'
 
 const props = defineProps({
   vm: { type: Object, required: true },
@@ -30,19 +31,39 @@ const hasMetrics = computed(
     otherMetrics.value.length
 )
 
+// A container can carry its own metrics too (currently just haproxy-*,
+// see stack.yaml) — unlike the VM-level families above, these are specific
+// to one container, so they're keyed by container id rather than being a
+// single flat list.
+const haproxyGroupsByContainer = computed(() =>
+  Object.fromEntries(
+    props.vm.containers.map((c) => [
+      c.id,
+      groupHaproxyMetricsByBackend(partitionMetricFamilies(metricsFor(c, 'container')).haproxyMetrics),
+    ])
+  )
+)
+
 // Rather than hand-tracking header/row/divider pixel heights in mapLayout.js
 // (a stack of independently-evolvable numbers that drifted out of sync with
 // this file's CSS more than once), the box just renders at its natural
 // intrinsic height and the caller measures it directly via `measure()` — see
 // MapView.vue's calibration pool. Badge row count is the one thing that
 // isn't yet knowable at mount (it depends on which metric families this VM
-// actually has, same as mapLayout.js used to compute), so it's still
-// tracked here — not for sizing, but to know when every badge has completed
-// its first fetch, so a hidden/hastily-measured box can be corrected once
-// real content (rather than a loading placeholder) has settled in.
-const totalBadges = computed(
-  () => (cpuMetrics.value.length ? 1 : 0) + (ramMetrics.value.length ? 1 : 0) + diskGroups.value.length + otherMetrics.value.length
-)
+// and its containers actually have, same as mapLayout.js used to compute),
+// so it's still tracked here — not for sizing, but to know when every badge
+// (VM-level and container-level) has completed its first fetch, so a
+// hidden/hastily-measured box can be corrected once real content (rather
+// than a loading placeholder) has settled in.
+const totalBadges = computed(() => {
+  const vmBadges =
+    (cpuMetrics.value.length ? 1 : 0) + (ramMetrics.value.length ? 1 : 0) + diskGroups.value.length + otherMetrics.value.length
+  const containerBadges = Object.values(haproxyGroupsByContainer.value).reduce(
+    (sum, groups) => sum + groups.length,
+    0
+  )
+  return vmBadges + containerBadges
+})
 let settledCount = 0
 let hasEmittedSettled = false
 function checkAllSettled() {
@@ -123,16 +144,26 @@ defineExpose({ measure })
         :key="c.id"
         :ref="(el) => setContainerEl(c.id, el)"
         class="map-container"
-        :title="c.role || c.image"
       >
-        <img
-          v-if="appFor(c.application)?.icon"
-          class="map-container__icon"
-          :src="appFor(c.application).icon"
-          :alt="appFor(c.application).label"
-        />
-        <span v-else class="map-container__dot" />
-        <span class="map-container__label">{{ c.image }}</span>
+        <div class="map-container__header" :title="c.role || c.image">
+          <img
+            v-if="appFor(c.application)?.icon"
+            class="map-container__icon"
+            :src="appFor(c.application).icon"
+            :alt="appFor(c.application).label"
+          />
+          <span v-else class="map-container__dot" />
+          <span class="map-container__label">{{ c.image }}</span>
+        </div>
+        <div v-if="haproxyGroupsByContainer[c.id].length" class="map-container__metrics">
+          <div
+            v-for="group in haproxyGroupsByContainer[c.id]"
+            :key="'haproxy-' + group.backend"
+            class="map-container__metrics-row"
+          >
+            <HaproxyBadge :metrics="group.metrics" :backend="group.backend" :resource-id="c.id" @settled="onBadgeSettled" />
+          </div>
+        </div>
       </div>
     </div>
     <div v-else class="map-vm__empty">no containers</div>
@@ -206,18 +237,41 @@ defineExpose({ measure })
   font-style: italic;
 }
 
+/* A plain container (no metrics) is just its __header row, so it still
+   renders at the same fixed 20px it always has — __metrics only adds
+   height for containers that actually have something to show (currently
+   just haproxy-fronting ones). */
 .map-container {
   display: flex;
-  align-items: center;
-  gap: 0.3rem;
+  flex-direction: column;
   font-size: 0.65rem;
-  height: 20px;
   padding: 0 0.4rem;
   border: 1px solid #cbd5e1;
   border-radius: 5px;
   background: #fafafa;
   color: #334155;
   box-sizing: border-box;
+}
+
+.map-container__header {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 20px;
+}
+
+.map-container__metrics {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 3px;
+}
+
+.map-container__metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 14px;
+  overflow: hidden;
 }
 
 .map-container__dot {
