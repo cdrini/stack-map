@@ -142,21 +142,24 @@ export function formatGiB(bytes, decimals = 1) {
   return (bytes / 1024 ** 3).toFixed(decimals)
 }
 
-// Green → red as busy % climbs. CPU and RAM get different curves because
+// Healthy → red as busy % climbs. CPU and RAM get different curves because
 // they fail differently: CPU degrades gradually (queueing delay creeps up
 // well before 100%), so a moderate threshold catches an early warning
 // sign. RAM's danger is a hard cliff right near the top (OOM kill / swap)
 // — 80-85% used is normal, healthy Linux behavior, not a problem — so it
-// stays green much higher and only turns red close to the ceiling.
+// stays "healthy" much higher and only turns red close to the ceiling.
+// The healthy tier is deliberately `plain` (no color/bold) rather than
+// green — a badge should only draw the eye when there's something to
+// look at, not for every normal reading.
 const CPU_BUSY_TIERS = [
-  { max: 50, color: '#15803d', background: '#dcfce7' }, // green
+  { max: 50, plain: true }, // healthy
   { max: 75, color: '#854d0e', background: '#fef9c3' }, // yellow
   { max: 90, color: '#9a3412', background: '#ffedd5' }, // orange
   { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
 ]
 
 const RAM_BUSY_TIERS = [
-  { max: 80, color: '#15803d', background: '#dcfce7' }, // green
+  { max: 80, plain: true }, // healthy
   { max: 90, color: '#854d0e', background: '#fef9c3' }, // yellow
   { max: 95, color: '#9a3412', background: '#ffedd5' }, // orange
   { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red

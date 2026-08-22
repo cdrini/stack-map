@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { buildTree, colorFor } from './spec.js'
+import { buildTree } from './spec.js'
 import { appFor } from './apps.js'
 
 const tree = computed(() => buildTree())
@@ -23,24 +23,14 @@ const tree = computed(() => buildTree())
             </div>
 
             <div v-if="vm.containers.length" class="vm__containers">
-              <div
-                v-for="c in vm.containers"
-                :key="c.id"
-                class="container-chip"
-                :style="{ borderColor: colorFor(c.role || c.image) }"
-                :title="c.role || c.image"
-              >
+              <div v-for="c in vm.containers" :key="c.id" class="container-chip" :title="c.role || c.image">
                 <img
                   v-if="appFor(c.application)?.icon"
                   class="container-chip__icon"
                   :src="appFor(c.application).icon"
                   :alt="appFor(c.application).label"
                 />
-                <span
-                  v-else
-                  class="container-chip__dot"
-                  :style="{ background: colorFor(c.role || c.image) }"
-                />
+                <span v-else class="container-chip__dot" />
                 {{ c.image }}
               </div>
             </div>
@@ -141,7 +131,7 @@ const tree = computed(() => buildTree())
   gap: 0.4rem;
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
-  border: 1px solid;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #fafafa;
   color: #334155;
@@ -151,6 +141,7 @@ const tree = computed(() => buildTree())
   width: 7px;
   height: 7px;
   border-radius: 999px;
+  background: #94a3b8;
   flex: none;
 }
 

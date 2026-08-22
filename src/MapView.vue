@@ -115,6 +115,14 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
       @pointerleave="onPointerUp"
     >
       <div
+        class="map-grid"
+        :style="{
+          backgroundPosition: `${view.x}px ${view.y}px`,
+          backgroundSize: `${20 * view.scale}px ${20 * view.scale}px`,
+        }"
+      ></div>
+
+      <div
         class="map-world"
         :style="{
           width: layout.totalWidth + 'px',
@@ -289,9 +297,7 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   overflow: hidden;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  background-color: #f8fafc;
-  background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
-  background-size: 20px 20px;
+  background-color: #cbd5e1;
   cursor: grab;
   touch-action: none;
 }
@@ -305,6 +311,19 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   top: 0;
   left: 0;
   transform-origin: 0 0;
+}
+
+/* Covers the whole viewport (not just .map-world's finite totalWidth x
+   totalHeight box) so the dots never "run out" while panning — CSS wraps
+   background-position/-size using modulo the tile size automatically, so
+   driving both from the same view.x/y/scale used for .map-world's
+   transform keeps the dots anchored to world-space without needing an
+   actually-infinite element. */
+.map-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(#94a3b8 1px, transparent 1px);
+  pointer-events: none;
 }
 
 .map-edges {

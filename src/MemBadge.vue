@@ -54,7 +54,8 @@ watch(refreshTick, load)
     <span
       v-else-if="busy !== null"
       class="mem-badge__chip"
-      :style="{ color: color.color, background: color.background }"
+      :class="{ 'mem-badge__chip--plain': color.plain }"
+      :style="color.plain ? null : { color: color.color, background: color.background }"
     >
       {{ formatGiB(usedBytes, 1) }} / {{ formatGiB(totalBytes, 1) }}GB ({{ busy.toFixed(0) }}%)
     </span>
@@ -93,6 +94,12 @@ watch(refreshTick, load)
 
 .mem-badge__chip--loading {
   color: #94a3b8;
+}
+
+.mem-badge__chip--plain {
+  font-weight: 400;
+  color: #64748b;
+  background: none;
 }
 
 .mem-badge__chip--error {

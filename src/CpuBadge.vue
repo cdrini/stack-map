@@ -68,7 +68,8 @@ watch(refreshTick, load)
     <span
       v-else-if="busy !== null"
       class="cpu-badge__chip"
-      :style="{ color: color.color, background: color.background }"
+      :class="{ 'cpu-badge__chip--plain': color.plain }"
+      :style="color.plain ? null : { color: color.color, background: color.background }"
     >
       Busy {{ busy.toFixed(0) }}%
     </span>
@@ -120,6 +121,12 @@ watch(refreshTick, load)
 
 .cpu-badge__chip--loading {
   color: #94a3b8;
+}
+
+.cpu-badge__chip--plain {
+  font-weight: 400;
+  color: #64748b;
+  background: none;
 }
 
 .cpu-badge__chip--error {

@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { colorFor, metricsFor } from './spec.js'
+import { metricsFor } from './spec.js'
 import { appFor } from './apps.js'
 import { partitionMetricFamilies } from './metrics.js'
 import MetricBadge from './MetricBadge.vue'
@@ -46,20 +46,14 @@ const hasMetrics = computed(
     <div class="map-vm__divider"></div>
 
     <div v-if="vm.containers.length" class="map-vm__containers">
-      <div
-        v-for="c in vm.containers"
-        :key="c.id"
-        class="map-container"
-        :style="{ borderColor: colorFor(c.role || c.image) }"
-        :title="c.role || c.image"
-      >
+      <div v-for="c in vm.containers" :key="c.id" class="map-container" :title="c.role || c.image">
         <img
           v-if="appFor(c.application)?.icon"
           class="map-container__icon"
           :src="appFor(c.application).icon"
           :alt="appFor(c.application).label"
         />
-        <span v-else class="map-container__dot" :style="{ background: colorFor(c.role || c.image) }" />
+        <span v-else class="map-container__dot" />
         <span class="map-container__label">{{ c.image }}</span>
       </div>
     </div>
@@ -146,7 +140,7 @@ const hasMetrics = computed(
   font-size: 0.65rem;
   height: 20px;
   padding: 0 0.4rem;
-  border: 1px solid;
+  border: 1px solid #cbd5e1;
   border-radius: 5px;
   background: #fafafa;
   color: #334155;
@@ -157,6 +151,7 @@ const hasMetrics = computed(
   width: 6px;
   height: 6px;
   border-radius: 999px;
+  background: #94a3b8;
   flex: none;
 }
 

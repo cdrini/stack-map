@@ -5,24 +5,6 @@ export const spec = load(specText)
 spec.externals ??= []
 spec.metrics ??= []
 
-const ROLE_COLORS = {
-  gunicorn: '#2563eb',
-  'gunicorn (fast lane)': '#1d4ed8',
-  haproxy: '#d97706',
-  nginx: '#059669',
-  postgres: '#7c3aed',
-  memcached: '#db2777',
-  'solr leader': '#0891b2',
-  'solr follower': '#0e7490',
-  monitoring: '#6b7280',
-}
-
-export function colorFor(role) {
-  if (!role) return '#334155'
-  const key = Object.keys(ROLE_COLORS).find((r) => role.startsWith(r))
-  return key ? ROLE_COLORS[key] : '#334155'
-}
-
 // Any server, VM, container, or external carries a `relationships: [{ to,
 // label }]` field in stack.yaml. This flattens all of them into one edge
 // list, independent of which level (or externality) either end is at.
