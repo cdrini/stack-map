@@ -3,7 +3,7 @@
 // kept separate from MapView.vue so the packing logic can be reasoned about
 // without the rendering/pan-zoom concerns.
 
-import { buildTopologyEdges } from './spec.js'
+import { buildTopologyEdges, metricsFor } from './spec.js'
 import { EXTERNAL_NODE_WIDTH, EXTERNAL_NODE_HEIGHT } from './externalLayout.js'
 
 const CONTAINER_W = 150
@@ -11,6 +11,8 @@ const CONTAINER_H = 20
 const CONTAINER_GAP = 4
 const VM_PADDING = 8
 const VM_HEADER = 24
+const VM_METRICS_ROW = 14 // must match VmBox.vue's .map-vm__metrics row height
+const VM_DIVIDER = 11 // must match VmBox.vue's .map-vm__divider (1px line + 5px margin above/below)
 const VM_GAP = 8
 const SERVER_PADDING = 14
 const SERVER_HEADER = 32
@@ -20,15 +22,17 @@ const MAX_ROW_WIDTH = 1500
 function layoutVm(vm) {
   const rows = vm.containers.length || 1
   const width = CONTAINER_W + VM_PADDING * 2
+  const metricsRow = metricsFor(vm, 'vm').length ? VM_METRICS_ROW : 0
+  const headerBlock = VM_HEADER + metricsRow + VM_DIVIDER
   const height =
-    VM_HEADER + VM_PADDING * 2 + rows * CONTAINER_H + Math.max(0, rows - 1) * CONTAINER_GAP
+    headerBlock + VM_PADDING * 2 + rows * CONTAINER_H + Math.max(0, rows - 1) * CONTAINER_GAP
 
   // Positions (relative to the VM box) of each container row, so edges can
   // attach to a specific container rather than just its VM.
   const containerPositions = vm.containers.map((container, i) => ({
     container,
     x: VM_PADDING,
-    y: VM_HEADER + VM_PADDING + i * (CONTAINER_H + CONTAINER_GAP),
+    y: headerBlock + VM_PADDING + i * (CONTAINER_H + CONTAINER_GAP),
     width: CONTAINER_W,
     height: CONTAINER_H,
   }))

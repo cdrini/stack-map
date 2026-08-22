@@ -3,6 +3,7 @@ import specText from './stack.yaml?raw'
 
 export const spec = load(specText)
 spec.externals ??= []
+spec.metrics ??= []
 
 const ROLE_COLORS = {
   gunicorn: '#2563eb',
@@ -61,6 +62,19 @@ export function buildTopologyEdges() {
     edges.push({ from, to })
   }
   return edges
+}
+
+// Every metric that applies to one entity: its own `metrics:` list, plus
+// any top-level `metrics:` entry whose `filter.type` includes this
+// entity's type (or that has no filter/filter.type at all, meaning it
+// applies everywhere). `entityType` is 'server' | 'vm' | 'container' |
+// 'external', matching stack.yaml's top-level section names singularized.
+export function metricsFor(entity, entityType) {
+  const ownMetrics = entity.metrics || []
+  const globalMetrics = spec.metrics.filter(
+    (m) => !m.filter?.type || m.filter.type.includes(entityType)
+  )
+  return [...ownMetrics, ...globalMetrics]
 }
 
 export function buildTree() {

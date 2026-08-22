@@ -8,13 +8,18 @@ occupancy, etc.) so slowness is visible at the level it's actually happening.
 ## Status
 
 Topology (servers/VMs/containers/relationships) is rendered from a
-hand-authored spec. Live metrics are just starting: Graphite's `/render`
-endpoint has no `Access-Control-Allow-Origin` header, so the browser can't
-`fetch()` it directly (confirmed — it's reachable, just not CORS-enabled), so
-`server/` is a small FastAPI proxy that makes that request server-side
-instead. Currently wired up for exactly one metric on one VM
-(`CpuMonitor.vue`, hardcoded to `ol-web0`'s load average) as a proof of
-concept before rolling it out to every VM.
+hand-authored spec. Live metrics: Graphite's `/render` endpoint has no
+`Access-Control-Allow-Origin` header, so the browser can't `fetch()` it
+directly (confirmed — it's reachable, just not CORS-enabled), so `server/` is
+a small FastAPI proxy that makes that request server-side instead and
+re-exposes it generically (any `source`/`query` pair, not tied to one metric
+or VM).
+
+CPU is the first metric wired up: every VM and server gets a "CPU: Busy NN%"
+badge (colored green→red), with `wait`/`steal` call-outs that only appear
+when elevated enough to suggest the strain isn't purely compute-bound —
+clicking a badge explains what the three mean. A "Live refresh (30s)" toggle
+in the map toolbar (on by default) re-polls all of them on a shared timer.
 
 ## Spec format
 
@@ -29,6 +34,12 @@ The container list was hand-transcribed from openlibrary's
 VM(s) it deploys to) — it will drift as that file changes, so re-check it
 against compose.production.yaml periodically rather than trusting it's
 current.
+
+Any entity can carry its own `metrics: [{ type, source, query }]`, and the
+top-level `metrics:` list applies a metric to every entity matching its
+`filter` (e.g. `filter: { type: [vm, server] }`) instead of repeating it
+per-entity — see the doc comments at the top of `src/stack.yaml` for the
+full shape, including how the `cpu-busy`/`cpu-wait`/`cpu-steal` family works.
 
 ## Dev
 
@@ -47,5 +58,8 @@ cd server
 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-`GET /api/vms/{vm_id}/load` → latest 1-minute load average for that VM, e.g.
-`/api/vms/ol-web0/load`.
+`GET /api/metrics/latest?source=<url>&query=<target>` → latest datapoint for
+one Graphite target, e.g.
+`/api/metrics/latest?source=http://graphite0-web.us.archive.org/render&query=collectd.ol-web0_us_archive_org.cpu.percent-idle`.
+`source` is checked against a small allowlist rather than proxying anywhere
+a caller asks.

@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { spec, buildTree, buildEdges } from './spec.js'
+import { spec, buildTree, buildEdges, metricsFor } from './spec.js'
+import { partitionCpuMetrics } from './metrics.js'
+import { liveRefreshEnabled } from './liveRefresh.js'
 import {
   computeMapLayout,
   computeFlatMapLayout,
@@ -12,6 +14,8 @@ import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
 import VmBox from './VmBox.vue'
 import ExternalNode from './ExternalNode.vue'
+import MetricBadge from './MetricBadge.vue'
+import CpuBadge from './CpuBadge.vue'
 
 const groupByServer = ref(false)
 const tree = computed(() => buildTree())
@@ -93,6 +97,10 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
         <input type="checkbox" v-model="groupByServer" />
         Group by server
       </label>
+      <label class="map-toolbar__toggle">
+        <input type="checkbox" v-model="liveRefreshEnabled" />
+        Live refresh (30s)
+      </label>
       <span class="map-toolbar__hint">scroll to zoom, drag to pan</span>
     </div>
 
@@ -132,6 +140,17 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
             <div class="map-server__label">
               <span class="map-server__icon">&#9639;</span>
               {{ s.server.id }}
+              <CpuBadge
+                v-if="partitionCpuMetrics(metricsFor(s.server, 'server')).cpuMetrics.length"
+                :metrics="partitionCpuMetrics(metricsFor(s.server, 'server')).cpuMetrics"
+                :resource-id="s.server.id"
+              />
+              <MetricBadge
+                v-for="metric in partitionCpuMetrics(metricsFor(s.server, 'server')).otherMetrics"
+                :key="metric.type"
+                :metric="metric"
+                :resource-id="s.server.id"
+              />
             </div>
 
             <VmBox

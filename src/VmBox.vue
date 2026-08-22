@@ -1,26 +1,42 @@
 <script setup>
-import { colorFor } from './spec.js'
+import { computed } from 'vue'
+import { colorFor, metricsFor } from './spec.js'
 import { appFor } from './apps.js'
-import CpuMonitor from './CpuMonitor.vue'
+import { partitionCpuMetrics } from './metrics.js'
+import MetricBadge from './MetricBadge.vue'
+import CpuBadge from './CpuBadge.vue'
 
-defineProps({
+const props = defineProps({
   vm: { type: Object, required: true },
   x: { type: Number, required: true },
   y: { type: Number, required: true },
   width: { type: Number, required: true },
   height: { type: Number, required: true },
 })
+
+const metrics = computed(() => metricsFor(props.vm, 'vm'))
+const cpuMetrics = computed(() => partitionCpuMetrics(metrics.value).cpuMetrics)
+const otherMetrics = computed(() => partitionCpuMetrics(metrics.value).otherMetrics)
 </script>
 
 <template>
   <div class="map-vm" :style="{ left: x + 'px', top: y + 'px', width: width + 'px', height: height + 'px' }">
     <div class="map-vm__header">
       <span class="map-vm__name">{{ vm.id }}</span>
-      <!-- Hardcoded to one VM for now — testing the FastAPI proxy before
-           building this out for every VM. -->
-      <CpuMonitor v-if="vm.id === 'ol-web0'" vm-id="ol-web0" />
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
+
+    <div v-if="metrics.length" class="map-vm__metrics">
+      <CpuBadge v-if="cpuMetrics.length" :metrics="cpuMetrics" :resource-id="vm.id" />
+      <MetricBadge
+        v-for="metric in otherMetrics"
+        :key="metric.type"
+        :metric="metric"
+        :resource-id="vm.id"
+      />
+    </div>
+
+    <div class="map-vm__divider"></div>
 
     <div v-if="vm.containers.length" class="map-vm__containers">
       <div
@@ -76,6 +92,26 @@ defineProps({
   font-size: 0.6rem;
   color: #94a3b8;
   white-space: nowrap;
+}
+
+/* Height must match mapLayout.js's VM_METRICS_ROW — that constant reserves
+   the box space this row actually needs. Spacing before the containers
+   list below comes from .map-vm__divider's own margin, not this row. */
+.map-vm__metrics {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 14px;
+  overflow: hidden;
+}
+
+/* Height (incl. margin) must match mapLayout.js's VM_DIVIDER. */
+.map-vm__divider {
+  height: 1px;
+  background: #e2e8f0;
+  /* Negative horizontal margin matches .map-vm's own 6px padding, so the
+     line reaches the box's edges instead of stopping at the padded area. */
+  margin: 5px -6px;
 }
 
 .map-vm__containers {

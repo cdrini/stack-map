@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import MapView from './MapView.vue'
 import ColumnView from './ColumnView.vue'
+import CpuExplainerModal from './CpuExplainerModal.vue'
 
 const activeView = ref('map')
 </script>
@@ -12,7 +13,7 @@ const activeView = ref('map')
       <div>
         <h1>Stack Map</h1>
         <p class="app-header__subtitle">
-          Baremetal &rarr; VM &rarr; container topology. Metrics wiring (Graphite/Grafana) comes in a later pass.
+          Baremetal &rarr; VM &rarr; container topology, with live Graphite metrics starting on CPU.
         </p>
       </div>
       <div class="view-toggle">
@@ -23,6 +24,8 @@ const activeView = ref('map')
 
     <MapView v-if="activeView === 'map'" />
     <ColumnView v-else />
+
+    <CpuExplainerModal />
   </div>
 </template>
 
