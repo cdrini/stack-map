@@ -1,3 +1,5 @@
+import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
+
 const API_BASE = 'http://localhost:8000'
 
 // Substitutes `{{id}}` in a metric's `query` template with the id of
@@ -7,15 +9,128 @@ export function resolveMetricQuery(metric, resourceId) {
   return metric.query.replaceAll('{{id}}', resourceId)
 }
 
-async function fetchOne(source, query) {
-  const params = new URLSearchParams({ source, query })
-  const res = await fetch(`${API_BASE}/api/metrics/latest?${params}`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
+// Toggling "Group by server" unmounts every VmBox (and every CpuBadge/
+// MemBadge inside it) and remounts a fresh set for the other layout —
+// each one would otherwise re-fetch from scratch and show "…" until data
+// comes back, even though the actual values are probably still current.
+// A value already fetched within the last refresh window is reused
+// instead of re-requested — it wouldn't have changed from a real refresh
+// yet either. Keyed on (source, query) rather than resourceId since
+// that's the actual unit of request/response; module-level so it survives
+// component unmount/remount (this file is a singleton for the page).
+// Only successes are cached — an error shouldn't get "stuck" for the
+// whole window when a retry might succeed.
+const resultCache = new Map() // `${source}::${query}` -> { result, fetchedAt }
+
+function cacheKey(source, query) {
+  return `${source}::${query}`
+}
+
+// Every badge on the map calls fetchLatestMetric independently, but they
+// mostly do it in synchronized bursts — everything fetches once on mount,
+// then again together on every liveRefresh tick (they all watch the same
+// refreshTick). With ~20 resources needing up to ~11 metrics each, that's
+// 200+ individual requests per burst if sent one-by-one. Graphite's
+// /render accepts multiple `target` params in one call, so this batches
+// same-source calls that land within a short window into chunks of
+// BATCH_SIZE instead — not all of them in a single request (a single
+// 200-target call risks being slow enough to itself become the
+// bottleneck, confirmed empirically: a 10-target call already took ~1s),
+// but far fewer than one request per metric.
+//
+// Chunks are packed by resourceId (never split one resource's metrics
+// across two requests) rather than sliced blindly in queue order — so a
+// VM's CPU and RAM badges land in the same response and update together,
+// instead of some fields refreshing a beat ahead of others depending on
+// which chunk happened to catch them. A resource needing more than
+// BATCH_SIZE metrics still gets one chunk to itself (kept whole rather
+// than split, at the cost of exceeding the target size) rather than being
+// torn across two requests.
+const BATCH_SIZE = 10
+const BATCH_WINDOW_MS = 50
+
+let pendingBySource = new Map() // source -> [{ query, resourceId, resolve, reject }]
+let flushTimer = null
+
+function scheduleFlush() {
+  if (flushTimer !== null) return
+  flushTimer = setTimeout(flushBatches, BATCH_WINDOW_MS)
+}
+
+function chunkByResource(items, targetSize) {
+  const byResource = new Map()
+  for (const item of items) {
+    if (!byResource.has(item.resourceId)) byResource.set(item.resourceId, [])
+    byResource.get(item.resourceId).push(item)
+  }
+
+  const chunks = []
+  let current = []
+  for (const group of byResource.values()) {
+    if (current.length > 0 && current.length + group.length > targetSize) {
+      chunks.push(current)
+      current = []
+    }
+    current.push(...group)
+  }
+  if (current.length > 0) chunks.push(current)
+  return chunks
+}
+
+function flushBatches() {
+  flushTimer = null
+  const bySource = pendingBySource
+  pendingBySource = new Map()
+
+  for (const [source, items] of bySource) {
+    for (const chunk of chunkByResource(items, BATCH_SIZE)) {
+      fetchChunk(source, chunk)
+    }
+  }
+}
+
+async function fetchChunk(source, items) {
+  const params = new URLSearchParams({ source })
+  for (const item of items) params.append('query', item.query)
+
+  try {
+    const res = await fetch(`${API_BASE}/api/metrics/latest?${params}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    for (const item of items) {
+      const result = data[item.query]
+      if (result) item.resolve(result)
+      else item.reject(new Error(`no data for ${item.query}`))
+    }
+  } catch (e) {
+    for (const item of items) item.reject(e)
+  }
+}
+
+function fetchOne(source, query, resourceId) {
+  const key = cacheKey(source, query)
+  const cached = resultCache.get(key)
+  if (cached && Date.now() - cached.fetchedAt < REFRESH_INTERVAL_MS) {
+    return Promise.resolve(cached.result)
+  }
+
+  return new Promise((resolve, reject) => {
+    if (!pendingBySource.has(source)) pendingBySource.set(source, [])
+    pendingBySource.get(source).push({
+      query,
+      resourceId,
+      resolve: (result) => {
+        resultCache.set(key, { result, fetchedAt: Date.now() })
+        resolve(result)
+      },
+      reject,
+    })
+    scheduleFlush()
+  })
 }
 
 export async function fetchLatestMetric(metric, resourceId) {
-  return fetchOne(metric.source, resolveMetricQuery(metric, resourceId))
+  return fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId)
 }
 
 // `cpu-*` and `mem-*`/`swap-*` each render as one composite widget

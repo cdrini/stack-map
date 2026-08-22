@@ -1,6 +1,8 @@
 import { ref, watch } from 'vue'
 
-const REFRESH_INTERVAL_MS = 30_000
+// Exported so metrics.js's short-lived cache can use the exact same window
+// — a value is "fresh" for as long as a refresh wouldn't have happened yet.
+export const REFRESH_INTERVAL_MS = 30_000
 
 // Shared across every CpuMonitor instance — one toggle, one timer, not
 // per-component, so they all refresh in lockstep.

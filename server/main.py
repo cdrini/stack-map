@@ -13,7 +13,7 @@ metric types, or the templating at all.
 """
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="stack-map metrics API")
@@ -34,27 +34,37 @@ ALLOWED_SOURCES = {"http://graphite0-web.us.archive.org/render"}
 
 
 @app.get("/api/metrics/latest")
-async def metrics_latest(source: str, query: str):
-    """Latest datapoint for one metric, e.g.
-    GET /api/metrics/latest?source=http://graphite.../render&query=collectd.foo.load
+async def metrics_latest(source: str, query: list[str] = Query(...)):
+    """Latest datapoint for one or more metrics in a single Graphite round
+    trip (Graphite's /render accepts repeated `target` params natively) —
+    e.g. GET /api/metrics/latest?source=http://graphite.../render&query=a&query=b.
+
+    Always returns an object keyed by query, `{query: {value, timestamp}}`,
+    even for a single query — the frontend's batching layer (metrics.js)
+    is the only caller and always wants that shape. A query with no data
+    (metric doesn't exist, or genuinely has none) maps to `null` rather
+    than failing the whole request — Graphite itself does this: an
+    unresolvable target is just silently absent from its response, not an
+    error, so partial results are the normal case here, not a fallback.
     """
     if source not in ALLOWED_SOURCES:
         raise HTTPException(status_code=400, detail=f"source not allowed: {source}")
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    params = [("target", q) for q in query] + [("from", "-5min"), ("format", "json")]
+    async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            response = await client.get(
-                source, params={"target": query, "from": "-5min", "format": "json"}
-            )
+            response = await client.get(source, params=params)
             response.raise_for_status()
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"metrics source request failed: {e}")
 
-    series = response.json()
-    datapoints = series[0]["datapoints"] if series else []
-    latest = next((dp for dp in reversed(datapoints) if dp[0] is not None), None)
-    if latest is None:
-        raise HTTPException(status_code=404, detail=f"no data for {query}")
+    by_target = {series["target"]: series for series in response.json()}
 
-    value, timestamp = latest
-    return {"query": query, "value": value, "timestamp": timestamp}
+    result = {}
+    for q in query:
+        series = by_target.get(q)
+        datapoints = series["datapoints"] if series else []
+        latest = next((dp for dp in reversed(datapoints) if dp[0] is not None), None)
+        result[q] = {"value": latest[0], "timestamp": latest[1]} if latest else None
+
+    return result
