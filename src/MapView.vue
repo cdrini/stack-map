@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { spec, buildTree, buildEdges, metricsFor } from './spec.js'
-import { partitionCpuMetrics } from './metrics.js'
+import { partitionMetricFamilies } from './metrics.js'
 import { liveRefreshEnabled } from './liveRefresh.js'
 import {
   computeMapLayout,
@@ -16,6 +16,7 @@ import VmBox from './VmBox.vue'
 import ExternalNode from './ExternalNode.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
+import MemBadge from './MemBadge.vue'
 
 const groupByServer = ref(false)
 const tree = computed(() => buildTree())
@@ -141,12 +142,17 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               <span class="map-server__icon">&#9639;</span>
               {{ s.server.id }}
               <CpuBadge
-                v-if="partitionCpuMetrics(metricsFor(s.server, 'server')).cpuMetrics.length"
-                :metrics="partitionCpuMetrics(metricsFor(s.server, 'server')).cpuMetrics"
+                v-if="partitionMetricFamilies(metricsFor(s.server, 'server')).cpuMetrics.length"
+                :metrics="partitionMetricFamilies(metricsFor(s.server, 'server')).cpuMetrics"
+                :resource-id="s.server.id"
+              />
+              <MemBadge
+                v-if="partitionMetricFamilies(metricsFor(s.server, 'server')).ramMetrics.length"
+                :metrics="partitionMetricFamilies(metricsFor(s.server, 'server')).ramMetrics"
                 :resource-id="s.server.id"
               />
               <MetricBadge
-                v-for="metric in partitionCpuMetrics(metricsFor(s.server, 'server')).otherMetrics"
+                v-for="metric in partitionMetricFamilies(metricsFor(s.server, 'server')).otherMetrics"
                 :key="metric.type"
                 :metric="metric"
                 :resource-id="s.server.id"

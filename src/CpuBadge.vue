@@ -2,7 +2,7 @@
 // Composite widget for the cpu-busy/cpu-wait/cpu-steal metric family (see
 // the doc comment on `metrics:` in stack.yaml) — `metrics` is whatever
 // subset of the three a resource actually has, from
-// metrics.js's partitionCpuMetrics. Shows CPU busy % as a colored chip,
+// metrics.js's partitionMetricFamilies. Shows CPU busy % as a colored chip,
 // green→red by how busy that is; wait/steal get their own small chips
 // alongside it, but only when they're elevated enough to suggest the
 // strain isn't purely compute-bound.

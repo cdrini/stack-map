@@ -4,6 +4,7 @@
 // without the rendering/pan-zoom concerns.
 
 import { buildTopologyEdges, metricsFor } from './spec.js'
+import { partitionMetricFamilies } from './metrics.js'
 import { EXTERNAL_NODE_WIDTH, EXTERNAL_NODE_HEIGHT } from './externalLayout.js'
 
 const CONTAINER_W = 150
@@ -19,10 +20,18 @@ const SERVER_HEADER = 32
 const SERVER_GAP = 28
 const MAX_ROW_WIDTH = 1500
 
+// One row per metric "family" actually present — cpu-*/mem-* each collapse
+// into a single composite badge, so they only cost one row each regardless
+// of how many raw metrics back them; anything ungrouped gets its own row.
+function countMetricRows(vm) {
+  const { cpuMetrics, ramMetrics, otherMetrics } = partitionMetricFamilies(metricsFor(vm, 'vm'))
+  return (cpuMetrics.length ? 1 : 0) + (ramMetrics.length ? 1 : 0) + otherMetrics.length
+}
+
 function layoutVm(vm) {
   const rows = vm.containers.length || 1
   const width = CONTAINER_W + VM_PADDING * 2
-  const metricsRow = metricsFor(vm, 'vm').length ? VM_METRICS_ROW : 0
+  const metricsRow = countMetricRows(vm) * VM_METRICS_ROW
   const headerBlock = VM_HEADER + metricsRow + VM_DIVIDER
   const height =
     headerBlock + VM_PADDING * 2 + rows * CONTAINER_H + Math.max(0, rows - 1) * CONTAINER_GAP

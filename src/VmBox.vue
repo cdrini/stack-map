@@ -2,9 +2,10 @@
 import { computed } from 'vue'
 import { colorFor, metricsFor } from './spec.js'
 import { appFor } from './apps.js'
-import { partitionCpuMetrics } from './metrics.js'
+import { partitionMetricFamilies } from './metrics.js'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
+import MemBadge from './MemBadge.vue'
 
 const props = defineProps({
   vm: { type: Object, required: true },
@@ -14,9 +15,13 @@ const props = defineProps({
   height: { type: Number, required: true },
 })
 
-const metrics = computed(() => metricsFor(props.vm, 'vm'))
-const cpuMetrics = computed(() => partitionCpuMetrics(metrics.value).cpuMetrics)
-const otherMetrics = computed(() => partitionCpuMetrics(metrics.value).otherMetrics)
+const families = computed(() => partitionMetricFamilies(metricsFor(props.vm, 'vm')))
+const cpuMetrics = computed(() => families.value.cpuMetrics)
+const ramMetrics = computed(() => families.value.ramMetrics)
+const otherMetrics = computed(() => families.value.otherMetrics)
+const hasMetrics = computed(
+  () => cpuMetrics.value.length || ramMetrics.value.length || otherMetrics.value.length
+)
 </script>
 
 <template>
@@ -26,14 +31,16 @@ const otherMetrics = computed(() => partitionCpuMetrics(metrics.value).otherMetr
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
 
-    <div v-if="metrics.length" class="map-vm__metrics">
-      <CpuBadge v-if="cpuMetrics.length" :metrics="cpuMetrics" :resource-id="vm.id" />
-      <MetricBadge
-        v-for="metric in otherMetrics"
-        :key="metric.type"
-        :metric="metric"
-        :resource-id="vm.id"
-      />
+    <div v-if="hasMetrics" class="map-vm__metrics">
+      <div v-if="cpuMetrics.length" class="map-vm__metrics-row">
+        <CpuBadge :metrics="cpuMetrics" :resource-id="vm.id" />
+      </div>
+      <div v-if="ramMetrics.length" class="map-vm__metrics-row">
+        <MemBadge :metrics="ramMetrics" :resource-id="vm.id" />
+      </div>
+      <div v-for="metric in otherMetrics" :key="metric.type" class="map-vm__metrics-row">
+        <MetricBadge :metric="metric" :resource-id="vm.id" />
+      </div>
     </div>
 
     <div class="map-vm__divider"></div>
@@ -94,10 +101,16 @@ const otherMetrics = computed(() => partitionCpuMetrics(metrics.value).otherMetr
   white-space: nowrap;
 }
 
-/* Height must match mapLayout.js's VM_METRICS_ROW — that constant reserves
-   the box space this row actually needs. Spacing before the containers
-   list below comes from .map-vm__divider's own margin, not this row. */
 .map-vm__metrics {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Height must match mapLayout.js's VM_METRICS_ROW — that constant reserves
+   one row's worth of box space per metric family actually rendered.
+   Spacing before the containers list below comes from .map-vm__divider's
+   own margin, not these rows. */
+.map-vm__metrics-row {
   display: flex;
   align-items: center;
   gap: 3px;
