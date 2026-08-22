@@ -14,9 +14,15 @@ const props = defineProps({
   resourceId: { type: String, required: true },
 })
 
+const emit = defineEmits(['settled'])
+
 const status = ref('loading') // 'loading' | 'ok' | 'error'
 const value = ref(null)
 const errorMessage = ref('')
+
+// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
+// settle, so the parent VmBox can correct a pre-data measurement.
+let hasSettledOnce = false
 
 async function load() {
   try {
@@ -26,6 +32,10 @@ async function load() {
   } catch (e) {
     errorMessage.value = e instanceof Error ? e.message : String(e)
     status.value = 'error'
+  }
+  if (!hasSettledOnce) {
+    hasSettledOnce = true
+    emit('settled')
   }
 }
 

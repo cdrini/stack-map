@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { spec, buildTree, buildEdges, metricsFor } from './spec.js'
 import { partitionMetricFamilies } from './metrics.js'
 import { liveRefreshEnabled } from './liveRefresh.js'
@@ -8,7 +8,8 @@ import {
   computeFlatMapLayout,
   flattenLayout,
   flattenFlatLayout,
-  pointOnRectTowards,
+  rightMidPoint,
+  leftMidPoint,
 } from './mapLayout.js'
 import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
@@ -20,6 +21,76 @@ import MemBadge from './MemBadge.vue'
 
 const groupByServer = ref(false)
 const tree = computed(() => buildTree())
+const allVms = computed(() => tree.value.flatMap((server) => server.vms))
+
+// Every VM's real size, measured from the DOM (see VmBox.vue's `measure()`)
+// rather than predicted from constants — vm.id -> { width, height,
+// containers: [{id,x,y,width,height}] }. Populated in two passes: once
+// immediately on mount, from a hidden pool that renders every VM's
+// "loading" state before anything is shown (so the very first layout
+// doesn't have to block on every metric fetch completing); and again, per
+// VM, once its badges' first real fetch has settled (see
+// onFirstMetricsSettled) — correcting the pre-data guess if the box's
+// actual content changed its shape, which today's fixed-height rows never
+// do, but a richer future badge design might.
+const measuredSizes = ref(new Map())
+const initialSizesReady = ref(false)
+
+const calibrationRefs = {}
+function setCalibrationRef(vmId, el) {
+  if (el) calibrationRefs[vmId] = el
+  else delete calibrationRefs[vmId]
+}
+
+onMounted(async () => {
+  await nextTick()
+  const sizes = new Map()
+  for (const vm of allVms.value) {
+    const el = calibrationRefs[vm.id]
+    if (el) sizes.set(vm.id, el.measure())
+  }
+  measuredSizes.value = sizes
+  initialSizesReady.value = true
+})
+
+const realVmRefs = {}
+function setRealVmRef(vmId, el) {
+  if (el) realVmRefs[vmId] = el
+  else delete realVmRefs[vmId]
+}
+
+const MEASUREMENT_EPSILON = 0.5 // px — ignore sub-pixel float noise between measurements
+function nearlyEqual(a, b) {
+  return Math.abs(a - b) < MEASUREMENT_EPSILON
+}
+function boxChanged(prev, next) {
+  if (!prev) return true
+  if (!nearlyEqual(prev.width, next.width) || !nearlyEqual(prev.height, next.height)) return true
+  if (prev.containers.length !== next.containers.length) return true
+  return prev.containers.some((c, i) => {
+    const m = next.containers[i]
+    return (
+      !nearlyEqual(c.x, m.x) ||
+      !nearlyEqual(c.y, m.y) ||
+      !nearlyEqual(c.width, m.width) ||
+      !nearlyEqual(c.height, m.height)
+    )
+  })
+}
+
+// Only re-measures and updates — never watches continuously (no
+// ResizeObserver) — since a VM's row count is fixed by its spec-configured
+// metrics, not by live data, so nothing should actually change here today;
+// this just guards against a future badge design where it might.
+function onFirstMetricsSettled(vmId) {
+  const el = realVmRefs[vmId]
+  if (!el) return
+  const measurement = el.measure(view.scale)
+  if (!boxChanged(measuredSizes.value.get(vmId), measurement)) return
+  const sizes = new Map(measuredSizes.value)
+  sizes.set(vmId, measurement)
+  measuredSizes.value = sizes
+}
 
 // Grouping by server has no relationship-based ordering at all (VMs are
 // grid-packed inside their server), so externals can't take part in a
@@ -33,9 +104,10 @@ const externalShift = computed(() =>
 )
 
 const layout = computed(() => {
-  if (!groupByServer.value) return computeFlatMapLayout(tree.value, spec.externals)
+  if (!initialSizesReady.value) return null
+  if (!groupByServer.value) return computeFlatMapLayout(tree.value, spec.externals, measuredSizes.value)
 
-  const base = computeMapLayout(tree.value)
+  const base = computeMapLayout(tree.value, measuredSizes.value)
   const shift = externalShift.value
   if (!shift) return base
   return {
@@ -47,6 +119,7 @@ const layout = computed(() => {
 })
 
 const renderedEdges = computed(() => {
+  if (!layout.value) return []
   const boxes = groupByServer.value ? flattenLayout(layout.value) : flattenFlatLayout(layout.value)
   if (groupByServer.value) {
     for (const ep of externalLayout.value.positions) {
@@ -61,18 +134,33 @@ const renderedEdges = computed(() => {
       console.warn(`stack-map: relationship references unknown id`, edge)
       continue
     }
-    const fromCenter = { x: fromBox.x + fromBox.width / 2, y: fromBox.y + fromBox.height / 2 }
-    const toCenter = { x: toBox.x + toBox.width / 2, y: toBox.y + toBox.height / 2 }
-    const p1 = pointOnRectTowards(fromBox, toCenter.x, toCenter.y)
-    const p2 = pointOnRectTowards(toBox, fromCenter.x, fromCenter.y)
+    const p1 = rightMidPoint(fromBox)
+    const p2 = leftMidPoint(toBox)
+
+    // Control points sit level with each endpoint (same y), so the curve
+    // leaves the source heading straight right and arrives at the target
+    // heading straight right too — matching the fixed left/right anchors
+    // instead of cutting across them at an angle. The horizontal offset
+    // scales with the distance between boxes (half the gap, floored) so
+    // short hops curve gently and long ones don't end up razor-straight in
+    // the middle before snapping sideways at the very ends.
+    const MIN_CONTROL_OFFSET = 30
+    const controlOffset = Math.max(MIN_CONTROL_OFFSET, Math.abs(p2.x - p1.x) / 2)
+    const c1 = { x: p1.x + controlOffset, y: p1.y }
+    const c2 = { x: p2.x - controlOffset, y: p2.y }
+
+    // Midpoint of the cubic bezier at t=0.5, not the straight-line
+    // midpoint — for a curve with a lot of vertical travel those two can
+    // be far apart, leaving the label floating off to the side of the line
+    // it's meant to caption.
+    const labelX = (p1.x + 3 * c1.x + 3 * c2.x + p2.x) / 8
+    const labelY = (p1.y + 3 * c1.y + 3 * c2.y + p2.y) / 8
+
     edges.push({
       id: `${edge.from}=>${edge.to}`,
-      x1: p1.x,
-      y1: p1.y,
-      x2: p2.x,
-      y2: p2.y,
-      labelX: (p1.x + p2.x) / 2,
-      labelY: (p1.y + p2.y) / 2,
+      path: `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${p2.x} ${p2.y}`,
+      labelX,
+      labelY,
       label: edge.label,
     })
   }
@@ -122,7 +210,10 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
         }"
       ></div>
 
+      <div v-if="!layout" class="map-measuring-hint">Measuring layout&hellip;</div>
+
       <div
+        v-else
         class="map-world"
         :style="{
           width: layout.totalWidth + 'px',
@@ -173,8 +264,8 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               :vm="vp.vm"
               :x="vp.x"
               :y="vp.y"
-              :width="vp.width"
-              :height="vp.height"
+              :ref="(el) => setRealVmRef(vp.vm.id, el)"
+              @first-metrics-settled="onFirstMetricsSettled"
             />
           </div>
         </template>
@@ -193,8 +284,8 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               :vm="node.vm"
               :x="node.x"
               :y="node.y"
-              :width="node.width"
-              :height="node.height"
+              :ref="(el) => setRealVmRef(node.vm.id, el)"
+              @first-metrics-settled="onFirstMetricsSettled"
             />
             <ExternalNode
               v-else
@@ -222,11 +313,9 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
             </marker>
           </defs>
           <g v-for="edge in renderedEdges" :key="edge.id">
-            <line
-              :x1="edge.x1"
-              :y1="edge.y1"
-              :x2="edge.x2"
-              :y2="edge.y2"
+            <path
+              :d="edge.path"
+              fill="none"
               stroke="#64748b"
               stroke-width="1.5"
               marker-end="url(#map-edge-arrow)"
@@ -238,6 +327,14 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
         </svg>
       </div>
     </div>
+
+    <!-- Renders every VM's real markup off-screen, unconstrained, purely to
+         read its natural size before the first real layout is computed —
+         see measuredSizes above. Torn down once that's done; it's not kept
+         around as a permanently-hidden duplicate of the real map. -->
+    <div v-if="!initialSizesReady" class="map-calibration-pool" aria-hidden="true">
+      <VmBox v-for="vm in allVms" :key="vm.id" :vm="vm" :ref="(el) => setCalibrationRef(vm.id, el)" />
+    </div>
   </div>
 </template>
 
@@ -247,6 +344,29 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   flex-direction: column;
   height: calc(100svh - 6.5rem);
   padding: 0 1.5rem 1.5rem;
+}
+
+.map-measuring-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+/* Off-screen and non-interactive, but NOT display:none — it needs to stay
+   in the layout tree for VmBox.vue's measure() to read real geometry from
+   it. Clipped to zero size so it can't affect page scroll bounds. */
+.map-calibration-pool {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .map-toolbar {

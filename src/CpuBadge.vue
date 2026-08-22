@@ -17,6 +17,8 @@ const props = defineProps({
   resourceId: { type: String, required: true },
 })
 
+const emit = defineEmits(['settled'])
+
 const busyMetric = computed(() => props.metrics.find((m) => m.type === 'cpu-busy'))
 
 const status = ref('loading') // 'loading' | 'ok' | 'error'
@@ -28,6 +30,15 @@ const stealElevated = ref(false)
 const errorMessage = ref('')
 
 const color = computed(() => (busy.value !== null ? cpuBusyColor(busy.value) : null))
+
+// Fired once, after this badge's first fetch settles (success or failure)
+// — regardless of live-data status — so the parent VmBox can tell when a
+// hidden/loading-state pre-measurement should be corrected against the box
+// as it actually looks once real content is in it. Later refreshes don't
+// re-fire this; only the box's own re-render (from new numbers, not new
+// rows) can happen after that, which the DOM already reflows for on its
+// own without needing a resize signal.
+let hasSettledOnce = false
 
 async function load() {
   try {
@@ -43,6 +54,10 @@ async function load() {
     // failed refresh doesn't mean the previous reading is now wrong.
     errorMessage.value = e instanceof Error ? e.message : String(e)
     status.value = 'error'
+  }
+  if (!hasSettledOnce) {
+    hasSettledOnce = true
+    emit('settled')
   }
 }
 

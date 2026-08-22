@@ -1,70 +1,41 @@
 // Geometry for the 2D map view: nested rectangles (server > VM > container)
-// laid out on a single canvas. Pure functions of the tree from buildTree(),
+// laid out on a single canvas. Pure functions of the tree from buildTree()
+// PLUS each VM's real measured size (see MapView.vue's calibration pool),
 // kept separate from MapView.vue so the packing logic can be reasoned about
 // without the rendering/pan-zoom concerns.
+//
+// VM/container geometry used to be predicted here from a stack of
+// independently-evolvable constants (header height, metrics-row height,
+// divider height, container height, padding, border) that had to be
+// hand-kept in sync with VmBox.vue's CSS — and drifted out of sync more
+// than once. Now it's read from the DOM instead of guessed: `measuredSizes`
+// (a Map of vm.id -> { width, height, containers }) is measured by
+// VmBox.vue's own `measure()` and passed in by the caller, so this file
+// never needs to know what a VM box is actually made of.
 
-import { buildTopologyEdges, metricsFor } from './spec.js'
-import { partitionMetricFamilies, groupDiskMetricsByDisk } from './metrics.js'
+import { buildTopologyEdges } from './spec.js'
 import { EXTERNAL_NODE_WIDTH, EXTERNAL_NODE_HEIGHT } from './externalLayout.js'
 
-const CONTAINER_W = 150
-const CONTAINER_H = 20
-const CONTAINER_GAP = 4
-const VM_PADDING = 8
-const VM_HEADER = 24
-const VM_METRICS_ROW = 14 // must match VmBox.vue's .map-vm__metrics row height
-const VM_DIVIDER = 11 // must match VmBox.vue's .map-vm__divider (1px line + 5px margin above/below)
 const VM_GAP = 8
 const SERVER_PADDING = 14
 const SERVER_HEADER = 32
 const SERVER_GAP = 28
 const MAX_ROW_WIDTH = 1500
 
-// One row per metric "family" actually present — cpu-*/mem-* each collapse
-// into a single composite badge, so they only cost one row each regardless
-// of how many raw metrics back them; anything ungrouped gets its own row.
-// disk-* is the one family that can cost more than one row: a VM with
-// several disks (stack.yaml's `disks:` field) gets one DiskBadge row per
-// device, since they're rendered separately rather than averaged.
-function countMetricRows(vm) {
-  const { cpuMetrics, ramMetrics, diskMetrics, otherMetrics } = partitionMetricFamilies(
-    metricsFor(vm, 'vm')
-  )
-  return (
-    (cpuMetrics.length ? 1 : 0) +
-    (ramMetrics.length ? 1 : 0) +
-    groupDiskMetricsByDisk(diskMetrics).length +
-    otherMetrics.length
-  )
-}
-
-function layoutVm(vm) {
-  const rows = vm.containers.length || 1
-  const width = CONTAINER_W + VM_PADDING * 2
-  const metricsRow = countMetricRows(vm) * VM_METRICS_ROW
-  const headerBlock = VM_HEADER + metricsRow + VM_DIVIDER
-  const height =
-    headerBlock + VM_PADDING * 2 + rows * CONTAINER_H + Math.max(0, rows - 1) * CONTAINER_GAP
-
-  // Positions (relative to the VM box) of each container row, so edges can
-  // attach to a specific container rather than just its VM.
-  const containerPositions = vm.containers.map((container, i) => ({
-    container,
-    x: VM_PADDING,
-    y: headerBlock + VM_PADDING + i * (CONTAINER_H + CONTAINER_GAP),
-    width: CONTAINER_W,
-    height: CONTAINER_H,
-  }))
-
-  return { kind: 'vm', id: vm.id, vm, width, height, containerPositions }
+function layoutVm(vm, measured) {
+  const containerPositions = vm.containers.map((container) => {
+    const m = measured.containers.find((c) => c.id === container.id)
+    return { container, x: m.x, y: m.y, width: m.width, height: m.height }
+  })
+  return { kind: 'vm', id: vm.id, vm, width: measured.width, height: measured.height, containerPositions }
 }
 
 function layoutExternalNode(external) {
   return { kind: 'external', id: external.id, external, width: EXTERNAL_NODE_WIDTH, height: EXTERNAL_NODE_HEIGHT }
 }
 
-function layoutServer(server) {
-  const vmDims = server.vms.map(layoutVm)
+function layoutServer(server, measuredSizes) {
+  const vmDims = server.vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id)))
   const cols = Math.max(1, Math.ceil(Math.sqrt(vmDims.length || 1)))
   const colWidths = []
   const rowHeights = []
@@ -136,8 +107,8 @@ function shelfPack(dims, gap, maxRowWidth) {
   return { positions, totalWidth, totalHeight }
 }
 
-export function computeMapLayout(tree) {
-  return shelfPack(tree.map(layoutServer), SERVER_GAP, MAX_ROW_WIDTH)
+export function computeMapLayout(tree, measuredSizes) {
+  return shelfPack(tree.map((server) => layoutServer(server, measuredSizes)), SERVER_GAP, MAX_ROW_WIDTH)
 }
 
 // Longest-path layering: nodes with no incoming edge sit at layer 0, and
@@ -435,9 +406,12 @@ function findComponents(ids, edges) {
 // space (e.g. both happening to have a layer-0 node) has no edge to hold
 // their relative vertical offset in place, so it ends up arbitrary and,
 // worse, un-anchored drift the alignment sweeps can grow without bound.
-export function computeFlatMapLayout(tree, externals = []) {
+export function computeFlatMapLayout(tree, externals = [], measuredSizes) {
   const vms = tree.flatMap((server) => server.vms)
-  const nodes = [...vms.map(layoutVm), ...externals.map(layoutExternalNode)]
+  const nodes = [
+    ...vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id))),
+    ...externals.map(layoutExternalNode),
+  ]
   const dimsById = new Map(nodes.map((n) => [n.id, n]))
   const edges = buildTopologyEdges()
 
@@ -568,17 +542,16 @@ export function flattenFlatLayout(layout) {
   return boxes
 }
 
-// Where a ray from `box`'s center toward (targetX, targetY) exits the box —
-// used to clip an edge to the border of the box it leaves/enters instead of
-// drawing through its interior.
-export function pointOnRectTowards(box, targetX, targetY) {
-  const cx = box.x + box.width / 2
-  const cy = box.y + box.height / 2
-  const dx = targetX - cx
-  const dy = targetY - cy
-  if (dx === 0 && dy === 0) return { x: cx, y: cy }
-  const scaleX = dx !== 0 ? box.width / 2 / Math.abs(dx) : Infinity
-  const scaleY = dy !== 0 ? box.height / 2 / Math.abs(dy) : Infinity
-  const scale = Math.min(scaleX, scaleY)
-  return { x: cx + dx * scale, y: cy + dy * scale }
+// Every layout here flows left-to-right (x increases with dependency
+// order), so relationship edges always leave a box's right side and arrive
+// at the target's left side — a fixed anchor per side, rather than
+// wherever a ray to the other box's center happens to exit, keeps arrows
+// visually consistent instead of poking out of arbitrary sides depending
+// on how two boxes happen to be vertically offset from each other.
+export function rightMidPoint(box) {
+  return { x: box.x + box.width, y: box.y + box.height / 2 }
+}
+
+export function leftMidPoint(box) {
+  return { x: box.x, y: box.y + box.height / 2 }
 }

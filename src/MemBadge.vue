@@ -16,6 +16,8 @@ const props = defineProps({
   resourceId: { type: String, required: true },
 })
 
+const emit = defineEmits(['settled'])
+
 const status = ref('loading') // 'loading' | 'ok' | 'error'
 const busy = ref(null)
 const usedBytes = ref(null)
@@ -25,6 +27,10 @@ const swapElevated = ref(false)
 const errorMessage = ref('')
 
 const color = computed(() => (busy.value !== null ? ramBusyColor(busy.value) : null))
+
+// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
+// settle, so the parent VmBox can correct a pre-data measurement.
+let hasSettledOnce = false
 
 async function load() {
   try {
@@ -40,6 +46,10 @@ async function load() {
     // failed refresh doesn't mean the previous reading is now wrong.
     errorMessage.value = e instanceof Error ? e.message : String(e)
     status.value = 'error'
+  }
+  if (!hasSettledOnce) {
+    hasSettledOnce = true
+    emit('settled')
   }
 }
 

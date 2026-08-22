@@ -23,6 +23,8 @@ const props = defineProps({
   multiDisk: { type: Boolean, default: false },
 })
 
+const emit = defineEmits(['settled'])
+
 const busyMetric = computed(() => props.metrics.find((m) => m.type === 'disk-busy'))
 const label = computed(() => (props.multiDisk ? `DISK ${props.disk}:` : 'DISK:'))
 
@@ -33,6 +35,10 @@ const pendingElevated = ref(false)
 const errorMessage = ref('')
 
 const color = computed(() => (busy.value !== null ? diskBusyColor(busy.value) : null))
+
+// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
+// settle, so the parent VmBox can correct a pre-data measurement.
+let hasSettledOnce = false
 
 async function load() {
   try {
@@ -46,6 +52,10 @@ async function load() {
     // failed refresh doesn't mean the previous reading is now wrong.
     errorMessage.value = e instanceof Error ? e.message : String(e)
     status.value = 'error'
+  }
+  if (!hasSettledOnce) {
+    hasSettledOnce = true
+    emit('settled')
   }
 }
 
