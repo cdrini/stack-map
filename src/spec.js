@@ -57,6 +57,32 @@ export function buildTopologyEdges() {
   return edges
 }
 
+// Same idea, one level further up — projects onto the servers hosting
+// things, for laying out server boxes topologically too (see mapLayout.js's
+// computeMapLayout). A container's relationship implies one between the
+// servers hosting its VM; a VM edge implies one between its own server and
+// the other end's. Externals have no `hostedOn` at all, so any edge
+// touching one just doesn't resolve here — same as a VM-to-external edge
+// not projecting onto a single VM in buildTopologyEdges above.
+export function buildServerTopologyEdges() {
+  const vmOfContainer = new Map(spec.containers.map((c) => [c.id, c.hostedOn]))
+  const serverOfVm = new Map(spec.vms.map((vm) => [vm.id, vm.hostedOn]))
+
+  function toServerId(id) {
+    const vmId = vmOfContainer.get(id) ?? id
+    return serverOfVm.get(vmId) ?? null
+  }
+
+  const edges = []
+  for (const edge of buildEdges()) {
+    const from = toServerId(edge.from)
+    const to = toServerId(edge.to)
+    if (!from || !to || from === to) continue
+    edges.push({ from, to })
+  }
+  return edges
+}
+
 // Every metric that applies to one entity: its own `metrics:` list, plus
 // any top-level `metrics:` entry whose `filter.type` includes this
 // entity's type (or that has no filter/filter.type at all, meaning it

@@ -29,6 +29,9 @@ const props = defineProps({
 })
 
 const groupByServer = ref(false)
+// Which algorithm "Group by server" uses to arrange servers among
+// themselves and VMs within each one — see mapLayout.js's computeMapLayout.
+const serverLayoutAlgorithm = ref('topo')
 // Unchecking this swaps in the same topological algorithm as the default
 // (ungrouped) view, but with containers themselves as the positioned
 // nodes instead of the VMs hosting them — see mapLayout.js's
@@ -200,7 +203,7 @@ const layout = computed(() => {
   }
   if (layoutMode.value === 'flat') return computeFlatMapLayout(tree.value, spec.externals, measuredSizes.value)
 
-  const base = computeMapLayout(tree.value, measuredSizes.value)
+  const base = computeMapLayout(tree.value, measuredSizes.value, serverLayoutAlgorithm.value)
   const shift = externalShift.value
   if (!shift) return base
   return {
@@ -351,6 +354,16 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
         <input type="checkbox" v-model="groupByServer" :disabled="!groupByVm" />
         Group by server
       </label>
+      <select
+        v-if="groupByServer"
+        v-model="serverLayoutAlgorithm"
+        class="map-toolbar__select"
+        :disabled="!groupByVm"
+        title="How 'Group by server' arranges servers among themselves and VMs within each one"
+      >
+        <option value="topo">Topological</option>
+        <option value="grid">Grid</option>
+      </select>
       <label class="map-toolbar__toggle" title="Unchecking positions containers themselves via the same topological algorithm, instead of nesting them in their VM's box">
         <input type="checkbox" v-model="groupByVm" />
         Group by VM
@@ -432,6 +445,13 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
             :attached-container-ids="attachedContainerIds"
             @hover-container="setHoveredContainer"
           />
+          <div
+            v-if="layout.hasUnconnected && layout.topoHeight > 0"
+            class="map-section-label"
+            :style="{ top: layout.topoHeight + externalShift + 8 + 'px' }"
+          >
+            no direct relationships
+          </div>
           <div
             v-for="s in layout.positions"
             :key="s.server.id"
@@ -643,6 +663,21 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 
 .map-toolbar button:hover {
   background: #f1f5f9;
+}
+
+.map-toolbar__select {
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.map-toolbar__select:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 
 .map-toolbar__readout {
