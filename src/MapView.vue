@@ -24,12 +24,10 @@ import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
 
-const props = defineProps({
-  // App-level toggle (see App.vue) — kept as a prop rather than read here
-  // directly so this component doesn't need its own opinion on where the
-  // setting lives or how it's persisted.
-  hoverDimEnabled: { type: Boolean, default: true },
-})
+// Was a prop from App.vue back when the toggle lived in a separate page
+// header — now that all controls float directly on the map itself, it's
+// just local state like everything else here.
+const hoverDimEnabled = ref(true)
 
 const groupByServer = ref(false)
 // Which algorithm "Group by server" uses to arrange servers among
@@ -311,19 +309,16 @@ const renderedEdges = computed(() => {
 const hoveredContainerId = ref(null)
 function setHoveredContainer(id) {
   // Ignored (rather than gating every consumer of hoveredContainerId
-  // individually) when the App-level toggle is off, so it just never gets
-  // set in the first place — nothing downstream needs its own awareness of
-  // the setting.
-  hoveredContainerId.value = props.hoverDimEnabled ? id : null
+  // individually) when the toggle is off, so it just never gets set in
+  // the first place — nothing downstream needs its own awareness of the
+  // setting.
+  hoveredContainerId.value = hoverDimEnabled.value ? id : null
 }
 // Also clears immediately if the toggle is switched off mid-hover, rather
 // than waiting for the next mouseleave/mouseenter to notice.
-watch(
-  () => props.hoverDimEnabled,
-  (enabled) => {
-    if (!enabled) hoveredContainerId.value = null
-  }
-)
+watch(hoverDimEnabled, (enabled) => {
+  if (!enabled) hoveredContainerId.value = null
+})
 
 // The hovered container plus everything it has a direct relationship
 // with (either direction) — null when nothing's hovered, meaning "don't
@@ -351,44 +346,8 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 
 <template>
   <div class="map-view">
-    <div class="map-toolbar">
-      <UButton
-        size="sm"
-        color="neutral"
-        variant="outline"
-        square
-        icon="i-lucide-plus"
-        aria-label="Zoom in"
-        @click="zoomBy(1.25)"
-      />
-      <UButton
-        size="sm"
-        color="neutral"
-        variant="outline"
-        square
-        icon="i-lucide-minus"
-        aria-label="Zoom out"
-        @click="zoomBy(1 / 1.25)"
-      />
-      <UButton size="sm" color="neutral" variant="outline" @click="reset()">Reset view</UButton>
-      <span class="map-toolbar__readout">{{ Math.round(view.scale * 100) }}%</span>
-      <UCheckbox v-model="groupByServer" label="Group by server" />
-      <USelect
-        v-if="groupByServer"
-        v-model="serverLayoutAlgorithm"
-        size="sm"
-        class="map-toolbar__select"
-        :items="[
-          { label: 'Topological', value: 'topo' },
-          { label: 'Grid', value: 'grid' },
-        ]"
-        title="How 'Group by server' arranges servers among themselves and units within each one"
-      />
-      <UCheckbox
-        v-model="groupByVm"
-        label="Group by VM"
-        title="Unchecking positions containers themselves via the same topological algorithm, instead of nesting them in their VM's box"
-      />
+    <!-- Data freshness: is it live, and how live. -->
+    <div class="map-hud map-hud--top-right">
       <UCheckbox v-model="liveRefreshEnabled" label="Live refresh (30s)" />
       <UButton
         v-if="!isRefreshing"
@@ -423,7 +382,58 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
           transform="rotate(-90 8 8)"
         />
       </svg>
-      <span class="map-toolbar__hint">scroll to zoom, drag to pan</span>
+    </div>
+
+    <!-- Structure (what the map is organized by/around) and navigation
+         (zoom/pan, dim-on-hover) share one bottom-center toolbar — neither
+         is tied to a particular screen edge the way the HUD panels above
+         are, so there's no "grows out of the edge" side for either. -->
+    <div class="map-hud-bottom-dock">
+    <div class="map-hud map-hud--bottom-center">
+      <UCheckbox v-model="groupByServer" label="Group by server" />
+      <USelect
+        v-if="groupByServer"
+        v-model="serverLayoutAlgorithm"
+        size="sm"
+        :items="[
+          { label: 'Topological', value: 'topo' },
+          { label: 'Grid', value: 'grid' },
+        ]"
+        title="How 'Group by server' arranges servers among themselves and units within each one"
+      />
+      <UCheckbox
+        v-model="groupByVm"
+        label="Group by VM"
+        title="Unchecking positions containers themselves via the same topological algorithm, instead of nesting them in their VM's box"
+      />
+
+      <div class="map-hud__divider" />
+
+      <UButton
+        size="sm"
+        color="neutral"
+        variant="outline"
+        square
+        icon="i-lucide-minus"
+        aria-label="Zoom out"
+        @click="zoomBy(1 / 1.25)"
+      />
+      <span class="map-toolbar__readout">{{ Math.round(view.scale * 100) }}%</span>
+      <UButton
+        size="sm"
+        color="neutral"
+        variant="outline"
+        square
+        icon="i-lucide-plus"
+        aria-label="Zoom in"
+        @click="zoomBy(1.25)"
+      />
+      <UButton size="sm" color="neutral" variant="outline" @click="reset()">Reset view</UButton>
+
+      <div class="map-hud__divider" />
+
+      <UCheckbox v-model="hoverDimEnabled" label="Dim unrelated on hover" />
+    </div>
     </div>
 
     <div
@@ -646,11 +656,12 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 </template>
 
 <style scoped>
+/* Fills the whole viewport — every control floats on top of the map
+   itself (see .map-hud below) rather than living in a page header, so
+   there's no separate layout region to reserve space for. */
 .map-view {
-  display: flex;
-  flex-direction: column;
-  height: calc(100svh - 6.5rem);
-  padding: 0 1.5rem 1.5rem;
+  position: fixed;
+  inset: 0;
 }
 
 .map-measuring-hint {
@@ -676,21 +687,110 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   pointer-events: none;
 }
 
-.map-toolbar {
+/* A floating HUD panel over the map — see the three usages above (bottom
+   left: structure, top right: data freshness, bottom right: navigation)
+   for what lives where and why. Always one row (never wraps to a second
+   line), flush against whichever screen edge it's anchored to (no gap,
+   square corners on that side) so it reads as a tab growing out of the
+   edge rather than a card floating independently — the opposite end is
+   fully rounded instead. Plain CSS rather than a UCard: this is just a
+   small, fully custom panel shape, not worth pulling in a whole
+   component's theme surface for. */
+.map-hud {
+  position: absolute;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding-bottom: 0.75rem;
+  flex-wrap: nowrap;
+  gap: 0.6rem;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.72) 0px,
+    rgba(255, 255, 255, 0.72) 14px,
+    rgba(255, 255, 255, 0.62) 22px,
+    rgba(255, 255, 255, 0.48) 30px,
+    rgba(255, 255, 255, 0.48) 38px,
+    rgba(255, 255, 255, 0.62) 46px,
+    rgba(255, 255, 255, 0.72) 54px
+  );
+  backdrop-filter: blur(14px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 4px 16px rgba(15, 23, 42, 0.12),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.8);
+  padding: 0.6rem 0.9rem;
+}
+
+/* Floats free of the edge, same as .map-hud--bottom-center — fully
+   rounded on all sides rather than growing out of the right edge. */
+.map-hud--top-right {
+  top: 1rem;
+  right: 1rem;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Positions the bottom-center toolbar; the scrolling on mobile (see
+   below) happens on this wrapper rather than on .map-hud--bottom-center
+   itself, so the pill stays visually intact (rounded, bordered) as
+   content that can spill past this dock's edges instead of being the
+   scroll container itself. */
+.map-hud-bottom-dock {
+  position: absolute;
+  z-index: 10;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+}
+
+/* Not anchored to any particular edge — floats free above the bottom
+   edge, fully rounded on all sides. Sized to its content (inline-flex,
+   not the base .map-hud's block-level flex) so it can be wider than
+   .map-hud-bottom-dock and overflow it on narrow screens instead of
+   being squeezed to fit. */
+.map-hud--bottom-center {
+  position: static;
+  display: inline-flex;
+  border-radius: 999px;
+}
+
+/* The dock has enough controls that a single row can overflow a
+   phone-width screen — rather than wrapping (which would leave the
+   vertical dividers stranded mid-row), the dock scrolls horizontally so
+   the pill inside can keep its one-line layout at full natural width. */
+@media (max-width: 640px) {
+  .map-hud-bottom-dock {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
+    overflow-x: auto;
+    padding: 10px;
+  }
+
+  /* Flex items shrink (and their text wraps) before a flex container
+     overflows by default — that fights the horizontal-scroll behavior
+     above by letting labels wrap onto a second line instead. Pinning
+     children to their natural width forces the pill to overflow the
+     dock (and thus scroll) rather than squeeze them. */
+  .map-hud--bottom-center > * {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
+
+.map-hud__divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.15rem 0;
+  background: #e2e8f0;
 }
 
 .map-toolbar__readout {
   font-size: 0.8rem;
   color: #64748b;
-  min-width: 3.5rem;
-}
-
-.map-toolbar__select {
-  min-width: 9rem;
+  min-width: 3rem;
+  text-align: center;
 }
 
 .map-toolbar__refresh-arc {
@@ -708,18 +808,10 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   transition: stroke-dashoffset 0.2s linear;
 }
 
-.map-toolbar__hint {
-  font-size: 0.78rem;
-  color: #94a3b8;
-  margin-left: auto;
-}
-
 .map-viewport {
-  position: relative;
-  flex: 1;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
   background-color: #cbd5e1;
   cursor: grab;
   touch-action: none;
