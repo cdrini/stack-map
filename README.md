@@ -50,16 +50,18 @@ npm run dev -- --host 0.0.0.0
 
 ## Metrics API (server/)
 
-FastAPI proxy in front of Graphite, so the browser talks to this instead of
-Graphite directly:
+FastAPI proxy in front of Graphite/Prometheus, so the browser talks to this
+instead of them directly. The real metrics-source hostnames name internal
+Archive infrastructure, so they're never hardcoded or committed — copy
+`server/.env.example` to `server/.env` (git-ignored) and fill in the real
+values before running:
 
 ```sh
 cd server
+cp .env.example .env  # then edit .env with the real hostnames
 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 `GET /api/metrics/latest?source=<url>&query=<target>` → latest datapoint for
-one Graphite target, e.g.
-`/api/metrics/latest?source=http://graphite0-web.us.archive.org/render&query=collectd.ol-web0_us_archive_org.cpu.percent-idle`.
-`source` is checked against a small allowlist rather than proxying anywhere
-a caller asks.
+one Graphite target. `source` is checked against a small allowlist (from
+`.env`, not the request) rather than proxying anywhere a caller asks.

@@ -15,29 +15,34 @@ VMs, metric types, or the templating at all.
 """
 
 import asyncio
-import os
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from env import get_env
+
+env = get_env()
+
 app = FastAPI(title="stack-map metrics API")
 
-# Permissive for now — this is a local dev tool with no auth of its own,
-# not something exposed beyond a developer's machine.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET"],
-    allow_headers=["*"],
-)
+# No CORS at all unless STACKMAP_CORS_ALLOWED_ORIGINS is set (see env.py) —
+# local dev sets it to "*" itself; production should set it to the deployed
+# frontend's real origin instead.
+if env.STACKMAP_CORS_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=env.STACKMAP_CORS_ALLOWED_ORIGINS,
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
 
 # `source` comes from stack.yaml (trusted), but is still client-supplied on
 # every request — an allowlist keeps this from doubling as an open proxy to
 # an arbitrary URL if that ever changed.
-ALLOWED_SOURCES = {"http://graphite0-web.us.archive.org/render"}
+ALLOWED_SOURCES = {env.STACKMAP_GRAPHITE_SOURCE}
 
-PROMETHEUS_SOURCES = {"http://ux-log0.us.archive.org:9090"}
+PROMETHEUS_SOURCES = {env.STACKMAP_PROMETHEUS_SOURCE}
 
 # stack.yaml always names the real production Prometheus — it's only
 # reachable from Archive's internal network, not from a developer's own
@@ -48,7 +53,7 @@ PROMETHEUS_SOURCES = {"http://ux-log0.us.archive.org:9090"}
 # Only the request target changes — `source` from the client still has to
 # match PROMETHEUS_SOURCES above, so this can't be used to reach anywhere
 # else.
-PROMETHEUS_URL_OVERRIDE = os.environ.get("STACKMAP_PROMETHEUS_URL_OVERRIDE")
+PROMETHEUS_URL_OVERRIDE = env.STACKMAP_PROMETHEUS_URL_OVERRIDE
 
 
 @app.get("/api/metrics/latest")
