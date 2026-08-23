@@ -827,6 +827,11 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   background-color: #cbd5e1;
   cursor: grab;
   touch-action: none;
+  /* Without this, browsers snap a trackpad's two-finger pan to whichever
+     axis dominates ("scroll axis locking") before our wheel handler ever
+     sees deltaX/deltaY — undoing that is the whole point of this
+     property. Chromium 153+ only for now; harmlessly ignored elsewhere. */
+  scroll-axis-lock: none;
 }
 
 .map-viewport:active {
