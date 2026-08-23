@@ -1,11 +1,7 @@
 <script setup>
-import { ref } from 'vue'
 import MapView from './MapView.vue'
-import ColumnView from './ColumnView.vue'
 import CpuExplainerModal from './CpuExplainerModal.vue'
 import DiskExplainerModal from './DiskExplainerModal.vue'
-
-const activeView = ref('map')
 </script>
 
 <template>
@@ -17,14 +13,9 @@ const activeView = ref('map')
           Baremetal &rarr; VM &rarr; container topology, with live Graphite metrics starting on CPU.
         </p>
       </div>
-      <div class="view-toggle">
-        <button :class="{ active: activeView === 'map' }" @click="activeView = 'map'">Map</button>
-        <button :class="{ active: activeView === 'columns' }" @click="activeView = 'columns'">Columns</button>
-      </div>
     </header>
 
-    <MapView v-if="activeView === 'map'" />
-    <ColumnView v-else />
+    <MapView />
 
     <CpuExplainerModal />
     <DiskExplainerModal />
@@ -53,29 +44,5 @@ const activeView = ref('map')
 .app-header__subtitle {
   margin: 0;
   color: #64748b;
-}
-
-.view-toggle {
-  display: flex;
-  gap: 0.25rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 0.2rem;
-  flex: none;
-}
-
-.view-toggle button {
-  border: none;
-  background: transparent;
-  padding: 0.35rem 0.8rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  color: #475569;
-}
-
-.view-toggle button.active {
-  background: #0f172a;
-  color: #fff;
 }
 </style>
