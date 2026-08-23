@@ -45,7 +45,7 @@ if env.STACKMAP_CORS_ALLOWED_ORIGINS:
 # `source` comes from stack.yaml (trusted), but is still client-supplied on
 # every request — an allowlist keeps this from doubling as an open proxy to
 # an arbitrary URL if that ever changed.
-ALLOWED_SOURCES = {env.STACKMAP_GRAPHITE_SOURCE}
+ALLOWED_SOURCES = set(env.STACKMAP_GRAPHITE_SOURCES)
 
 PROMETHEUS_SOURCES = {env.STACKMAP_PROMETHEUS_SOURCE}
 

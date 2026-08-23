@@ -62,6 +62,9 @@ const solrGroupsByContainer = computed(() =>
     props.vm.containers.map((c) => [c.id, groupSolrMetricsByHandler(containerFamiliesById.value[c.id].solrMetrics)])
   )
 )
+const otherMetricsByContainer = computed(() =>
+  Object.fromEntries(props.vm.containers.map((c) => [c.id, containerFamiliesById.value[c.id].otherMetrics]))
+)
 
 // Rather than hand-tracking header/row/divider pixel heights in mapLayout.js
 // (a stack of independently-evolvable numbers that drifted out of sync with
@@ -79,7 +82,8 @@ const totalBadges = computed(() => {
     (cpuMetrics.value.length ? 1 : 0) + (ramMetrics.value.length ? 1 : 0) + diskGroups.value.length + otherMetrics.value.length
   const haproxyBadges = Object.values(haproxyGroupsByContainer.value).reduce((sum, groups) => sum + groups.length, 0)
   const solrBadges = Object.values(solrGroupsByContainer.value).reduce((sum, groups) => sum + groups.length, 0)
-  return vmBadges + haproxyBadges + solrBadges
+  const otherBadges = Object.values(otherMetricsByContainer.value).reduce((sum, metrics) => sum + metrics.length, 0)
+  return vmBadges + haproxyBadges + solrBadges + otherBadges
 })
 let settledCount = 0
 let hasEmittedSettled = false
@@ -272,6 +276,11 @@ defineExpose({ measure })
             />
           </div>
         </div>
+        <div v-if="otherMetricsByContainer[c.id].length" class="map-container__metrics">
+          <div v-for="metric in otherMetricsByContainer[c.id]" :key="metric.type" class="map-container__metrics-row">
+            <MetricBadge :metric="metric" :resource-id="c.id" @settled="onBadgeSettled" />
+          </div>
+        </div>
       </div>
       </UContextMenu>
     </div>
@@ -408,8 +417,8 @@ defineExpose({ measure })
 }
 
 /* Plain rows for a container's metrics that don't split into distinct
-   sub-resources (currently just solr-*) — no bordered box, just another
-   row, same idea as .map-vm__metrics-row. */
+   sub-resources (solr-*, custom) — no bordered box, just another row,
+   same idea as .map-vm__metrics-row. */
 .map-container__metrics {
   display: flex;
   flex-direction: column;

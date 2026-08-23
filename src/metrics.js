@@ -605,3 +605,14 @@ export function isDiskBusyCritical(busyPercent) {
 export function isHaproxySessionsCritical(busyPercent) {
   return haproxySessionsColor(busyPercent) === HAPROXY_SESSIONS_TIERS.at(-1)
 }
+
+// `type: custom` metrics (see stack.yaml's doc comment) carry their own
+// warn/danger thresholds instead of this file hardcoding a per-type tier
+// table the way every other family above does — this file has no way to
+// know in advance what "healthy" means for an arbitrary future metric.
+export function customMetricColor(value, thresholds) {
+  if (!thresholds) return { plain: true }
+  if (value >= thresholds.danger) return { color: '#b91c1c', background: '#fee2e2' } // red
+  if (value >= thresholds.warn) return { color: '#854d0e', background: '#fef9c3' } // yellow
+  return { plain: true } // normal
+}

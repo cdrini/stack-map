@@ -48,9 +48,14 @@ class Env:
     def STACKMAP_BASE_PATH(self) -> str:
         return os.environ.get("STACKMAP_BASE_PATH", "").rstrip("/")
 
+    # Comma-separated if metrics are ever split across more than one Graphite
+    # instance (stack.yaml metrics each name their own `source:` exactly —
+    # this is just the allowlist main.py checks that against). A single
+    # value with no comma still works exactly as before.
     @cached_property
-    def STACKMAP_GRAPHITE_SOURCE(self) -> str:
-        return self._required("STACKMAP_GRAPHITE_SOURCE")
+    def STACKMAP_GRAPHITE_SOURCES(self) -> list[str]:
+        raw = self._required("STACKMAP_GRAPHITE_SOURCE")
+        return [source.strip() for source in raw.split(",") if source.strip()]
 
     @cached_property
     def STACKMAP_PROMETHEUS_SOURCE(self) -> str:

@@ -14,6 +14,7 @@ import { containerMenuItems } from './containerMenu.js'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import HaproxyBadge from './HaproxyBadge.vue'
 import SolrBadge from './SolrBadge.vue'
+import MetricBadge from './MetricBadge.vue'
 
 const props = defineProps({
   container: { type: Object, required: true },
@@ -28,10 +29,11 @@ const emit = defineEmits(['recheck-size', 'hover-container'])
 const families = computed(() => partitionMetricFamilies(metricsFor(props.container, 'container')))
 const haproxyGroups = computed(() => groupHaproxyMetricsByBackend(families.value.haproxyMetrics))
 const solrGroups = computed(() => groupSolrMetricsByHandler(families.value.solrMetrics))
+const otherMetrics = computed(() => families.value.otherMetrics)
 
 // Same idea as VmBox.vue's totalBadges/checkAllSettled, scoped to just this
 // one container's own badges rather than a whole VM's worth.
-const totalBadges = computed(() => haproxyGroups.value.length + solrGroups.value.length)
+const totalBadges = computed(() => haproxyGroups.value.length + solrGroups.value.length + otherMetrics.value.length)
 let settledCount = 0
 let hasEmittedSettled = false
 function checkAllSettled() {
@@ -137,6 +139,11 @@ defineExpose({ measure })
           @settled="onBadgeSettled"
           @empty-change="(v) => setHandlerEmpty(group.handler, v)"
         />
+      </div>
+    </div>
+    <div v-if="otherMetrics.length" class="map-container-node__metrics">
+      <div v-for="metric in otherMetrics" :key="metric.type" class="map-container-node__metrics-row">
+        <MetricBadge :metric="metric" :resource-id="container.id" @settled="onBadgeSettled" />
       </div>
     </div>
   </div>
