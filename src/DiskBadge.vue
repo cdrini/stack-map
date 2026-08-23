@@ -105,7 +105,7 @@ watch(refreshTick, load)
   display: flex;
   align-items: center;
   gap: 3px;
-  cursor: pointer;
+  cursor: help;
   border-radius: 5px;
 }
 
