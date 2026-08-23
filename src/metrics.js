@@ -1,7 +1,11 @@
 import { ref } from 'vue'
 import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
 
-const API_BASE = 'http://localhost:8000'
+// Same-origin by default — production serves the built frontend and the API
+// from the same FastAPI process (see server/main.py), so relative URLs just
+// work. Local dev runs them as two separate servers, so .env.development
+// points this at the standalone API server's own port.
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 // How many metric fetches are outstanding right now, and how many the
 // current batch started with — a cache hit never touches either (nothing's

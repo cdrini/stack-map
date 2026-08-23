@@ -1,0 +1,12 @@
+services:
+  stack-map:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - server/.env
+    # Lets STACKMAP_PROMETHEUS_URL_OVERRIDE reach a tunnel/service running on
+    # the host from Linux too — Docker Desktop (Mac/Windows) already resolves
+    # host.docker.internal without this.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

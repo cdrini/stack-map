@@ -15,10 +15,12 @@ VMs, metric types, or the templating at all.
 """
 
 import asyncio
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from env import get_env
 
@@ -123,3 +125,13 @@ async def prometheus_metrics_latest(source: str, query: list[str] = Query(...)):
         results = await asyncio.gather(*(_fetch_prometheus_one(client, base, q) for q in query))
 
     return dict(results)
+
+
+# The Docker image builds the frontend into ./static (see the repo root
+# Dockerfile) so the whole app — API and UI — is served from this one
+# process; a bare `uv run uvicorn main:app` for local dev has no static/
+# dir, so this is skipped and the frontend runs separately via `npm run
+# dev`. Mounted last so it only catches requests the routes above didn't.
+STATIC_DIR = Path(__file__).parent / "static"
+if STATIC_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

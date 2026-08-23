@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+docs
+.git
+.vscode
+.idea
+*.md
+
+server/.venv
+server/__pycache__
+server/.env
+server/.env.example
+**/*.pyc
