@@ -1,11 +1,6 @@
 import { ref } from 'vue'
+import { API_BASE } from './apiBase.js'
 import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
-
-// Same-origin by default — production serves the built frontend and the API
-// from the same FastAPI process (see server/main.py), so relative URLs just
-// work. Local dev runs them as two separate servers, so .env.development
-// points this at the standalone API server's own port.
-const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 // How many metric fetches are outstanding right now, and how many the
 // current batch started with — a cache hit never touches either (nothing's
@@ -29,9 +24,15 @@ function untrackPending() {
 }
 
 // haproxy-*/solr-* metrics are Prometheus-backed rather than Graphite-backed
-// — this is the one thing that decides which backend endpoint a chunk of
-// same-source queries goes to (see fetchChunk).
-const PROMETHEUS_SOURCE = 'http://ux-log0.us.archive.org:9090'
+// — this decides which backend endpoint a chunk of same-source queries goes
+// to (see fetchChunk). Keyed off the metric's `type` rather than comparing
+// its `source` against the real Prometheus hostname, so that hostname never
+// has to appear in client-shipped code (it's already kept out of the repo —
+// see stack.yaml/STACKMAP_SPEC_PATH — this is the same concern applied to
+// the built bundle).
+function isPrometheusBacked(type) {
+  return type.startsWith('haproxy-') || type.startsWith('solr-')
+}
 
 // Substitutes `{{id}}` in a metric's `query` template with the id of
 // whatever entity it's attached to — see the `metrics` doc comment at the
@@ -137,7 +138,9 @@ async function fetchChunk(source, items) {
   const params = new URLSearchParams({ source })
   for (const item of items) params.append('query', item.query)
 
-  const endpoint = source === PROMETHEUS_SOURCE ? '/api/metrics/prometheus/latest' : '/api/metrics/latest'
+  // Every item here shares one `source`, which in practice names exactly
+  // one backend — take it from the first item rather than re-deriving it.
+  const endpoint = items[0].isPrometheus ? '/api/metrics/prometheus/latest' : '/api/metrics/latest'
   try {
     const res = await fetch(`${API_BASE}${endpoint}?${params}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -152,7 +155,7 @@ async function fetchChunk(source, items) {
   }
 }
 
-function fetchOne(source, query, resourceId) {
+function fetchOne(source, query, resourceId, isPrometheus) {
   const key = cacheKey(source, query)
   const cached = resultCache.get(key)
   if (cached && Date.now() - cached.fetchedAt < REFRESH_INTERVAL_MS) {
@@ -165,6 +168,7 @@ function fetchOne(source, query, resourceId) {
     pendingBySource.get(source).push({
       query,
       resourceId,
+      isPrometheus,
       resolve: (result) => {
         resultCache.set(key, { result, fetchedAt: Date.now() })
         untrackPending()
@@ -181,7 +185,7 @@ function fetchOne(source, query, resourceId) {
 }
 
 export async function fetchLatestMetric(metric, resourceId) {
-  return fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId)
+  return fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId, isPrometheusBacked(metric.type))
 }
 
 // `cpu-*`, `mem-*`/`swap-*`, and `disk-*` each render as one composite

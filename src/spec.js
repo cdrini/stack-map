@@ -1,9 +1,20 @@
 import { load } from 'js-yaml'
-import specText from './stack.yaml?raw'
+import { API_BASE } from './apiBase.js'
 
-export const spec = load(specText)
-spec.externals ??= []
-spec.metrics ??= []
+// Names real internal Archive infrastructure, so it's never bundled into
+// the build (unlike most Vite apps' data) — fetched from the API server at
+// runtime instead (see server/main.py's /api/spec and STACKMAP_SPEC_PATH).
+// Populated by loadSpec() before the app is mounted (see main.js), so every
+// other module can keep treating `spec` as available synchronously.
+export const spec = {}
+
+export async function loadSpec() {
+  const res = await fetch(`${API_BASE}/api/spec`)
+  if (!res.ok) throw new Error(`failed to load stack spec: ${res.status}`)
+  Object.assign(spec, load(await res.text()))
+  spec.externals ??= []
+  spec.metrics ??= []
+}
 
 // Any server, VM, container, or external carries a `relationships: [{ to,
 // label }]` field in stack.yaml. This flattens all of them into one edge

@@ -1,5 +1,7 @@
 """Metrics API for stack-map: proxies Graphite and Prometheus so the browser
-doesn't have to.
+doesn't have to, and serves the stack topology spec itself (see /api/spec) —
+neither the spec nor the metrics-source hostnames it contains are ever
+committed to the repo, since they name real internal Archive infrastructure.
 
 Graphite's /render endpoint has no Access-Control-Allow-Origin header, so a
 direct browser fetch() gets blocked by CORS even though the server itself is
@@ -20,6 +22,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from env import get_env
@@ -56,6 +59,16 @@ PROMETHEUS_SOURCES = {env.STACKMAP_PROMETHEUS_SOURCE}
 # match PROMETHEUS_SOURCES above, so this can't be used to reach anywhere
 # else.
 PROMETHEUS_URL_OVERRIDE = env.STACKMAP_PROMETHEUS_URL_OVERRIDE
+
+
+@app.get("/api/spec", response_class=PlainTextResponse)
+async def spec():
+    """The stack topology, as raw YAML — the frontend parses it itself (it
+    already depends on js-yaml). Read fresh on every request rather than
+    cached at startup, so editing STACKMAP_SPEC_PATH's file takes effect on
+    the next browser refresh instead of a server restart.
+    """
+    return env.STACKMAP_SPEC_PATH.read_text()
 
 
 @app.get("/api/metrics/latest")

@@ -11,4 +11,5 @@ server/.venv
 server/__pycache__
 server/.env
 server/.env.example
+src/stack.yaml
 **/*.pyc

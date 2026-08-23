@@ -7,10 +7,16 @@ expected names).
 
 import os
 from functools import cached_property
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Local dev's own copy, one level up from this file — see .gitignore.
+# Deployments (e.g. the Docker image, which never gets this file baked in)
+# override STACKMAP_SPEC_PATH to wherever it's actually mounted instead.
+DEFAULT_SPEC_PATH = Path(__file__).parent.parent / "src" / "stack.yaml"
 
 
 class Env:
@@ -19,6 +25,18 @@ class Env:
         if not value:
             raise RuntimeError(f"{name} must be set — copy server/.env.example to server/.env and fill it in")
         return value
+
+    # The spec itself names real internal infrastructure (server/VM/container
+    # topology), so — like the metrics-source hostnames below — it's never
+    # committed, only ever read from disk here, at a path that's overridable
+    # per-deployment rather than fixed to local dev's own layout.
+    @cached_property
+    def STACKMAP_SPEC_PATH(self) -> Path:
+        raw = os.environ.get("STACKMAP_SPEC_PATH")
+        path = Path(raw) if raw else DEFAULT_SPEC_PATH
+        if not path.is_file():
+            raise RuntimeError(f"STACKMAP_SPEC_PATH does not exist: {path}")
+        return path
 
     @cached_property
     def STACKMAP_GRAPHITE_SOURCE(self) -> str:

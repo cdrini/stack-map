@@ -23,7 +23,14 @@ in the map toolbar (on by default) re-polls all of them on a shared timer.
 
 ## Spec format
 
-`src/stack.yaml` is a flat entity model: `servers`, `vms`, `containers`, each
+`src/stack.yaml` names real internal Archive infrastructure, so it's never
+committed — it's git-ignored, and the server reads it from disk at
+`STACKMAP_SPEC_PATH` (defaulting to that same local path) and serves it to
+the frontend at runtime via `GET /api/spec`, rather than it being bundled
+into the build. A fresh clone needs to create this file itself before the
+app shows anything.
+
+It's a flat entity model: `servers`, `vms`, `containers`, each
 with a stable `id`. VMs point at their server via `hostedOn`; containers point
 at their VM via `hostedOn`. Flat rather than nested so relations that aren't
 strict parent/child (e.g. an haproxy's backend pool spanning VMs across
