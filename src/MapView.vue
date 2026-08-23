@@ -180,12 +180,14 @@ function onRecheckSizeContainer(containerId) {
   measuredContainerSizes.value = sizes
 }
 
-// Grouping by server has no relationship-based ordering at all (VMs are
-// grid-packed inside their server), so externals can't take part in a
-// topology there — they get a fixed row above instead, and the rest of the
-// map is shifted down to make room for it. The ungrouped layout has real
-// topological positioning, so there externals are full graph participants
-// (see computeFlatMapLayout) rather than a fixed decoration.
+// Grouping by server positions VMs topologically within their own server's
+// box (see mapLayout.js's layoutServer), but that's scoped to one server at
+// a time — an external isn't hosted on any single server, so it can't be a
+// participant in any one server's sub-layout. It gets a fixed row above
+// instead, and the rest of the map is shifted down to make room for it.
+// The ungrouped layout has no such scoping issue, so there externals are
+// full graph participants (see computeFlatMapLayout) rather than a fixed
+// decoration.
 const externalLayout = computed(() => layoutExternals(spec.externals))
 const externalShift = computed(() =>
   externalLayout.value.positions.length ? externalLayout.value.totalHeight + EXTERNAL_ROW_GAP : 0

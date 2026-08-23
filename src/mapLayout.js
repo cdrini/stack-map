@@ -42,51 +42,32 @@ function layoutContainerNode(container, measured) {
   return { kind: 'container', id: container.id, container, width: measured.width, height: measured.height }
 }
 
-function layoutServer(server, measuredSizes) {
+// VMs within one server are positioned by the same topological algorithm
+// as the ungrouped map view (see computeTopologicalLayout below) — a
+// server's rectangle is exactly as wide/tall as its own VMs' relationships
+// demand, rather than a fixed grid. `topologyEdges` is VM-to-VM only
+// (buildTopologyEdges(), already projected — see spec.js) filtered down to
+// edges where both ends are hosted here; an edge leaving the server can't
+// meaningfully position anything inside this one box, so it's simply not
+// part of this server's own sub-layout (it's still drawn on the full map,
+// same as any other edge — see MapView.vue's renderedEdges).
+function layoutServer(server, measuredSizes, topologyEdges) {
   const vmDims = server.vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id)))
-  const cols = Math.max(1, Math.ceil(Math.sqrt(vmDims.length || 1)))
-  const colWidths = []
-  const rowHeights = []
+  const vmIds = new Set(vmDims.map((d) => d.id))
+  const localEdges = topologyEdges.filter((e) => vmIds.has(e.from) && vmIds.has(e.to))
+  const topo = computeTopologicalLayout(vmDims, localEdges)
 
-  vmDims.forEach((dim, i) => {
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    colWidths[col] = Math.max(colWidths[col] || 0, dim.width)
-    rowHeights[row] = Math.max(rowHeights[row] || 0, dim.height)
-  })
-
-  const colX = []
-  let acc = 0
-  for (let c = 0; c < cols; c++) {
-    colX[c] = acc
-    acc += (colWidths[c] || 0) + VM_GAP
-  }
-  const rowY = []
-  acc = 0
-  for (let r = 0; r < rowHeights.length; r++) {
-    rowY[r] = acc
-    acc += rowHeights[r] + VM_GAP
-  }
-
-  const vmPositions = vmDims.map((dim, i) => {
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    return {
-      ...dim,
-      x: SERVER_PADDING + colX[col],
-      y: SERVER_HEADER + SERVER_PADDING + rowY[row],
-    }
-  })
-
-  const contentWidth = colWidths.reduce((a, b) => a + b, 0) + VM_GAP * Math.max(0, cols - 1)
-  const contentHeight =
-    rowHeights.reduce((a, b) => a + b, 0) + VM_GAP * Math.max(0, rowHeights.length - 1)
+  const vmPositions = topo.positions.map((p) => ({
+    ...p,
+    x: p.x + SERVER_PADDING,
+    y: p.y + SERVER_HEADER + SERVER_PADDING,
+  }))
 
   return {
     server,
     vmPositions,
-    width: contentWidth + SERVER_PADDING * 2,
-    height: SERVER_HEADER + SERVER_PADDING * 2 + contentHeight,
+    width: topo.totalWidth + SERVER_PADDING * 2,
+    height: SERVER_HEADER + SERVER_PADDING * 2 + topo.totalHeight,
   }
 }
 
@@ -116,7 +97,12 @@ function shelfPack(dims, gap, maxRowWidth) {
 }
 
 export function computeMapLayout(tree, measuredSizes) {
-  return shelfPack(tree.map((server) => layoutServer(server, measuredSizes)), SERVER_GAP, MAX_ROW_WIDTH)
+  const topologyEdges = buildTopologyEdges()
+  return shelfPack(
+    tree.map((server) => layoutServer(server, measuredSizes, topologyEdges)),
+    SERVER_GAP,
+    MAX_ROW_WIDTH
+  )
 }
 
 // Longest-path layering: nodes with no incoming edge sit at layer 0, and
