@@ -4,13 +4,18 @@
 # Only this stage needs node/npm/node_modules — none of that ships in the
 # final image, just the static files vite produces in dist/.
 FROM node:22-alpine AS frontend-builder
+# Where this app is actually served from — "/" for the domain root, or e.g.
+# "/stack-map/" behind an nginx location that forwards the full path through
+# unchanged rather than stripping it. Must match STACKMAP_BASE_PATH at
+# runtime (see server/env.py), since that's what the API routes use.
+ARG BASE_PATH=/
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY index.html vite.config.js ./
 COPY public ./public
 COPY src ./src
-RUN npm run build
+RUN npm run build -- --base="$BASE_PATH"
 
 # ---- API server, also serving the built frontend ----
 FROM python:3.14-slim AS runtime

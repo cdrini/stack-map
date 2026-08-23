@@ -1,6 +1,15 @@
 services:
   stack-map:
-    build: .
+    build:
+      context: .
+      args:
+        # e.g. STACKMAP_BASE_PATH=/stack-map/ in a .env file next to this
+        # compose file (not server/.env — that one's for the container's
+        # own runtime env, this is a build-time arg) when deployed behind
+        # an nginx location that forwards its full path through unchanged.
+        # Defaults to the domain root, matching STACKMAP_BASE_PATH's
+        # runtime default below.
+        BASE_PATH: ${STACKMAP_BASE_PATH:-/}
     ports:
       - "8000:8000"
     env_file:
@@ -14,6 +23,7 @@ services:
       - ./src/stack.yaml:/data/stack.yaml:ro
     environment:
       STACKMAP_SPEC_PATH: /data/stack.yaml
+      STACKMAP_BASE_PATH: ${STACKMAP_BASE_PATH:-}
     # Lets STACKMAP_PROMETHEUS_URL_OVERRIDE reach a tunnel/service running on
     # the host from Linux too — Docker Desktop (Mac/Windows) already resolves
     # host.docker.internal without this.

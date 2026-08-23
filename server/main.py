@@ -20,7 +20,7 @@ import asyncio
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -60,8 +60,14 @@ PROMETHEUS_SOURCES = {env.STACKMAP_PROMETHEUS_SOURCE}
 # else.
 PROMETHEUS_URL_OVERRIDE = env.STACKMAP_PROMETHEUS_URL_OVERRIDE
 
+# Routes live on a router rather than `app` directly so STACKMAP_BASE_PATH
+# (e.g. "/stack-map", for an nginx location block that forwards the full
+# path through unchanged rather than stripping its prefix) can prefix all
+# of them at once — empty by default, meaning served from the domain root.
+router = APIRouter()
 
-@app.get("/api/spec", response_class=PlainTextResponse)
+
+@router.get("/api/spec", response_class=PlainTextResponse)
 async def spec():
     """The stack topology, as raw YAML — the frontend parses it itself (it
     already depends on js-yaml). Read fresh on every request rather than
@@ -71,7 +77,7 @@ async def spec():
     return env.STACKMAP_SPEC_PATH.read_text()
 
 
-@app.get("/api/metrics/latest")
+@router.get("/api/metrics/latest")
 async def metrics_latest(source: str, query: list[str] = Query(...)):
     """Latest datapoint for one or more metrics in a single Graphite round
     trip (Graphite's /render accepts repeated `target` params natively) —
@@ -122,7 +128,7 @@ async def _fetch_prometheus_one(client: httpx.AsyncClient, base: str, query: str
     return query, {"value": float(value), "timestamp": timestamp}
 
 
-@app.get("/api/metrics/prometheus/latest")
+@router.get("/api/metrics/prometheus/latest")
 async def prometheus_metrics_latest(source: str, query: list[str] = Query(...)):
     """Same contract as /api/metrics/latest, but for Prometheus's instant
     query API — one request per query (Prometheus has no equivalent of
@@ -140,11 +146,15 @@ async def prometheus_metrics_latest(source: str, query: list[str] = Query(...)):
     return dict(results)
 
 
+app.include_router(router, prefix=env.STACKMAP_BASE_PATH)
+
 # The Docker image builds the frontend into ./static (see the repo root
-# Dockerfile) so the whole app — API and UI — is served from this one
-# process; a bare `uv run uvicorn main:app` for local dev has no static/
-# dir, so this is skipped and the frontend runs separately via `npm run
-# dev`. Mounted last so it only catches requests the routes above didn't.
+# Dockerfile, which also bakes STACKMAP_BASE_PATH into the built asset URLs
+# via vite's `base` — the two must agree) so the whole app — API and UI —
+# is served from this one process; a bare `uv run uvicorn main:app` for
+# local dev has no static/ dir, so this is skipped and the frontend runs
+# separately via `npm run dev`. Mounted last so it only catches requests
+# the routes above didn't.
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+    app.mount(env.STACKMAP_BASE_PATH or "/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

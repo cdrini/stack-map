@@ -38,6 +38,16 @@ class Env:
             raise RuntimeError(f"STACKMAP_SPEC_PATH does not exist: {path}")
         return path
 
+    # Empty by default — served from the domain root. Set this when a
+    # reverse proxy forwards a location's full path through unchanged
+    # instead of stripping it (e.g. an nginx `location /stack-map { ...
+    # proxy_pass ...; }` block with no trailing slash on proxy_pass) — must
+    # match the BASE_PATH build arg the Docker image was built with, since
+    # that's what controls the built frontend's own asset URLs.
+    @cached_property
+    def STACKMAP_BASE_PATH(self) -> str:
+        return os.environ.get("STACKMAP_BASE_PATH", "").rstrip("/")
+
     @cached_property
     def STACKMAP_GRAPHITE_SOURCE(self) -> str:
         return self._required("STACKMAP_GRAPHITE_SOURCE")
