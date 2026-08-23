@@ -221,6 +221,7 @@ defineExpose({ measure })
           />
           <span v-else class="map-container__dot" />
           <span class="map-container__label">{{ c.image }}</span>
+          <span v-if="c.replicas" class="map-container__replicas" :title="`${c.replicas} replicas`">x{{ c.replicas }}</span>
         </div>
         <div v-if="haproxyGroupsByContainer[c.id].length" class="map-container__backends">
           <div v-for="group in haproxyGroupsByContainer[c.id]" :key="'haproxy-' + group.backend" class="map-container__backend">
@@ -337,7 +338,7 @@ defineExpose({ measure })
   display: flex;
   flex-direction: column;
   font-size: 0.65rem;
-  padding: 0 0.4rem;
+  padding: 0 3px;
   border: 1px solid #cbd5e1;
   border-radius: 5px;
   background: #fafafa;
@@ -409,5 +410,16 @@ defineExpose({ measure })
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.map-container__replicas {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #64748b;
+  background: #e2e8f0;
+  padding: 1px 4px;
+  border-radius: 4px;
 }
 </style>
