@@ -14,7 +14,9 @@ RUN npm run build
 
 # ---- API server, also serving the built frontend ----
 FROM python:3.14-slim AS runtime
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# uv from PyPI rather than ghcr.io's own image — a plain `pip install` also
+# works for a host that only has registry access to PyPI/Docker Hub, not ghcr.io.
+RUN pip install --no-cache-dir uv
 WORKDIR /app
 
 # Dependency layer first so it's cached across source-only changes.
