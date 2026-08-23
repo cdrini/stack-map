@@ -10,6 +10,8 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { metricsFor } from './spec.js'
 import { appFor } from './apps.js'
 import { partitionMetricFamilies, groupHaproxyMetricsByBackend, groupSolrMetricsByHandler } from './metrics.js'
+import { containerMenuItems } from './containerMenu.js'
+import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import HaproxyBadge from './HaproxyBadge.vue'
 import SolrBadge from './SolrBadge.vue'
 
@@ -79,6 +81,7 @@ defineExpose({ measure })
 </script>
 
 <template>
+  <UContextMenu :items="containerMenuItems(container)" size="sm">
   <div
     ref="rootEl"
     class="map-container-node"
@@ -137,6 +140,7 @@ defineExpose({ measure })
       </div>
     </div>
   </div>
+  </UContextMenu>
 </template>
 
 <style scoped>

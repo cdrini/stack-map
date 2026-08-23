@@ -8,6 +8,8 @@ import {
   groupHaproxyMetricsByBackend,
   groupSolrMetricsByHandler,
 } from './metrics.js'
+import { containerMenuItems } from './containerMenu.js'
+import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
@@ -219,9 +221,13 @@ defineExpose({ measure })
     <div class="map-vm__divider"></div>
 
     <div v-if="vm.containers.length" class="map-vm__containers">
-      <div
+      <UContextMenu
         v-for="c in vm.containers"
         :key="c.id"
+        :items="containerMenuItems(c)"
+        size="sm"
+      >
+      <div
         :ref="(el) => setContainerEl(c.id, el)"
         class="map-container"
         :class="{ 'map-container--dimmed': attachedContainerIds && !attachedContainerIds.has(c.id) }"
@@ -267,6 +273,7 @@ defineExpose({ measure })
           </div>
         </div>
       </div>
+      </UContextMenu>
     </div>
     <div v-else class="map-vm__empty">no containers</div>
   </div>
