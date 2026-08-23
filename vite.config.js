@@ -4,7 +4,27 @@ import ui from '@nuxt/ui/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [vue(), ui()],
+  plugins: [
+    vue(),
+    ui({
+      // Nuxt UI defaults to following the OS/browser's dark/light
+      // preference (colorMode: true) — this app only has a light design
+      // (see style.css's `color-scheme: light`), so that's disabled rather
+      // than having its controls flip to dark-mode colors against our
+      // light backgrounds.
+      colorMode: false,
+      ui: {
+        colors: {
+          // Default primary is green; 'stormy' is a custom muted
+          // blue-gray defined via `@theme static` in style.css — stock
+          // Tailwind blue/sky read as too bright/saturated next to the
+          // map's own muted palette. `neutral` is left at its own default
+          // ("slate"), which the map's grays already are.
+          primary: 'stormy',
+        },
+      },
+    }),
+  ],
   optimizeDeps: {
     // @nuxt/ui's own Vite plugin excludes *itself* from pre-bundling (it
     // needs Vite's normal transform pipeline to resolve its `#imports`

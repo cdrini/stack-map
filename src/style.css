@@ -1,12 +1,38 @@
 @import 'tailwindcss';
 @import '@nuxt/ui';
 
+/* A muted blue-gray ("stormy sea") scale for Nuxt UI's `primary` color
+   (see vite.config.js) — deliberately less saturated than Tailwind's
+   stock blue/sky, closer in mood to the slate grays already used
+   throughout the map itself, just with more blue in it. `static` (not
+   plain @theme) matters: a name only referenced inside Nuxt UI's own
+   dynamically-generated component classes (not literally written
+   anywhere in our own source) otherwise gets tree-shaken away before
+   Tailwind's content scanner ever sees it "used". */
+@theme static {
+  --color-stormy-50: #f1f5f8;
+  --color-stormy-100: #e2eaf0;
+  --color-stormy-200: #c7d6e3;
+  --color-stormy-300: #a3bccf;
+  --color-stormy-400: #7d9db8;
+  --color-stormy-500: #5c7f9d;
+  --color-stormy-600: #47657f;
+  --color-stormy-700: #395067;
+  --color-stormy-800: #2d3f52;
+  --color-stormy-900: #212e3c;
+  --color-stormy-950: #131c26;
+}
+
 :root {
   /* This app only has a light design so far — "light dark" here would let
      browsers auto-apply dark-mode form control colors (e.g. white button
      text) against our explicitly light backgrounds. */
   color-scheme: light;
-  font: 16px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+  /* No manual font-family here — Tailwind's own preflight already sets a
+     comprehensive system-font stack (--font-sans) on html, which Nuxt UI's
+     components inherit from same as everything else. */
+  font-size: 16px;
+  line-height: 1.45;
 }
 
 body {
