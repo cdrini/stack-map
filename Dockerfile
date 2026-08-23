@@ -9,6 +9,10 @@ FROM node:22-alpine AS frontend-builder
 # unchanged rather than stripping it. Must match STACKMAP_BASE_PATH at
 # runtime (see server/env.py), since that's what the API routes use.
 ARG BASE_PATH=/
+# A private registry mirror (e.g. an internal Nexus), for hosts that can't
+# reach the public registry directly — empty (the default) uses npm's own
+# default registry. npm reads this env var itself; no --registry flag needed.
+ARG NPM_CONFIG_REGISTRY
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -19,6 +23,11 @@ RUN npm run build -- --base="$BASE_PATH"
 
 # ---- API server, also serving the built frontend ----
 FROM python:3.14-slim AS runtime
+# Same idea as NPM_CONFIG_REGISTRY above, for pip and uv — both read these
+# env vars natively, so no --index-url flag is needed on the RUN commands
+# below. Empty (the default) uses PyPI directly.
+ARG PIP_INDEX_URL
+ARG UV_DEFAULT_INDEX=$PIP_INDEX_URL
 # uv from PyPI rather than ghcr.io's own image — a plain `pip install` also
 # works for a host that only has registry access to PyPI/Docker Hub, not ghcr.io.
 RUN pip install --no-cache-dir uv

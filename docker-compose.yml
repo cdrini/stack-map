@@ -10,6 +10,12 @@ services:
         # Defaults to the domain root, matching STACKMAP_BASE_PATH's
         # runtime default below.
         BASE_PATH: ${STACKMAP_BASE_PATH:-/}
+        # A host that can't reach the public npm/PyPI registries directly
+        # (e.g. behind a firewall) sets these to an internal mirror like
+        # Nexus — same .env file as STACKMAP_BASE_PATH above. Empty by
+        # default, meaning the public registries.
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     ports:
       - "8000:8000"
     env_file:
