@@ -2,8 +2,8 @@ import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
 
 const API_BASE = 'http://localhost:8000'
 
-// haproxy-* metrics are Prometheus-backed rather than Graphite-backed —
-// this is the one thing that decides which backend endpoint a chunk of
+// haproxy-*/solr-* metrics are Prometheus-backed rather than Graphite-backed
+// — this is the one thing that decides which backend endpoint a chunk of
 // same-source queries goes to (see fetchChunk).
 const PROMETHEUS_SOURCE = 'http://ux-log0.us.archive.org:9090'
 
@@ -163,20 +163,23 @@ const HAPROXY_METRIC_TYPES = new Set([
   'haproxy-up',
   'haproxy-total',
 ])
+const SOLR_METRIC_TYPES = new Set(['solr-request-rate', 'solr-error-rate', 'solr-timeout-rate'])
 
 export function partitionMetricFamilies(metrics) {
   const cpuMetrics = metrics.filter((m) => CPU_METRIC_TYPES.has(m.type))
   const ramMetrics = metrics.filter((m) => RAM_METRIC_TYPES.has(m.type))
   const diskMetrics = metrics.filter((m) => DISK_METRIC_TYPES.has(m.type))
   const haproxyMetrics = metrics.filter((m) => HAPROXY_METRIC_TYPES.has(m.type))
+  const solrMetrics = metrics.filter((m) => SOLR_METRIC_TYPES.has(m.type))
   const otherMetrics = metrics.filter(
     (m) =>
       !CPU_METRIC_TYPES.has(m.type) &&
       !RAM_METRIC_TYPES.has(m.type) &&
       !DISK_METRIC_TYPES.has(m.type) &&
-      !HAPROXY_METRIC_TYPES.has(m.type)
+      !HAPROXY_METRIC_TYPES.has(m.type) &&
+      !SOLR_METRIC_TYPES.has(m.type)
   )
-  return { cpuMetrics, ramMetrics, diskMetrics, haproxyMetrics, otherMetrics }
+  return { cpuMetrics, ramMetrics, diskMetrics, haproxyMetrics, solrMetrics, otherMetrics }
 }
 
 // A VM with multiple disks (see stack.yaml's `disks:` field) has its
@@ -211,6 +214,23 @@ export function groupHaproxyMetricsByBackend(haproxyMetrics) {
   return [...byBackend.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([backend, metrics]) => ({ backend, metrics }))
+}
+
+// Same idea again, for a solr container's per-handler metrics (see
+// stack.yaml's doc comment on `handler`) — groups back by handler
+// (/select, /get, /update, ...) so each gets its own SolrBadge row.
+// Ordered explicitly (not alphabetically) since these read best as
+// "the endpoint users actually search with" first.
+const SOLR_HANDLER_ORDER = ['/select', '/get', '/update', '/query', '/export', '/replication']
+export function groupSolrMetricsByHandler(solrMetrics) {
+  const byHandler = new Map()
+  for (const m of solrMetrics) {
+    if (!byHandler.has(m.handler)) byHandler.set(m.handler, [])
+    byHandler.get(m.handler).push(m)
+  }
+  return [...byHandler.entries()]
+    .sort(([a], [b]) => SOLR_HANDLER_ORDER.indexOf(a) - SOLR_HANDLER_ORDER.indexOf(b))
+    .map(([handler, metrics]) => ({ handler, metrics }))
 }
 
 const WAIT_THRESHOLD = 10 // % — above this, treat as disk/network-bound, not just "busy"
@@ -384,6 +404,59 @@ export async function fetchHaproxyMetrics(haproxyMetrics, resourceId) {
     // Only flagged once both numbers are actually known — a missing metric
     // shouldn't read as "servers are down".
     healthDegraded: upCount !== null && totalCount !== null && upCount < totalCount,
+  }
+}
+
+// Both turned out to have a small persistent background trickle even when
+// healthy, rather than sitting at exact 0% the way disk-pending/
+// haproxy-queue do — observed live at ~0.001-0.003% for errors and
+// ~0.01-0.03% for timeouts across all three solr VMs. Each threshold is
+// set with headroom above its own noise floor rather than sharing one
+// number, since the two floors differ by roughly 10x. Worth revisiting
+// with more data.
+const ERROR_RATE_THRESHOLD = 0.01
+const TIMEOUT_RATE_THRESHOLD = 0.1
+
+function safePercent(part, whole) {
+  return whole > 0 ? (part / whole) * 100 : 0
+}
+
+// `solrMetrics` is whatever subset of solr-request-rate/-error-rate/
+// -timeout-rate this container actually has — request-rate is required
+// (it's the denominator error/timeout are expressed as a % of); the other
+// two are optional. Unlike the busy-% families, request rate itself isn't
+// colored — more traffic isn't inherently bad, so it's shown as a plain
+// figure and only the error/timeout %s (which do have a clear "healthy is
+// near zero" direction) get call-outs.
+export async function fetchSolrMetrics(solrMetrics, resourceId) {
+  const byType = Object.fromEntries(solrMetrics.map((m) => [m.type, m]))
+  const requestRateMetric = byType['solr-request-rate']
+  if (!requestRateMetric) throw new Error('solr-request-rate not configured for this resource')
+
+  const [requestRate, errorRate, timeoutRate] = await Promise.allSettled([
+    fetchLatestMetric(requestRateMetric, resourceId),
+    byType['solr-error-rate']
+      ? fetchLatestMetric(byType['solr-error-rate'], resourceId)
+      : Promise.reject(new Error('solr-error-rate not configured')),
+    byType['solr-timeout-rate']
+      ? fetchLatestMetric(byType['solr-timeout-rate'], resourceId)
+      : Promise.reject(new Error('solr-timeout-rate not configured')),
+  ])
+
+  if (requestRate.status !== 'fulfilled') {
+    throw new Error(requestRate.reason instanceof Error ? requestRate.reason.message : String(requestRate.reason))
+  }
+
+  const rps = requestRate.value.value
+  const errorPercent = errorRate.status === 'fulfilled' ? safePercent(errorRate.value.value, rps) : null
+  const timeoutPercent = timeoutRate.status === 'fulfilled' ? safePercent(timeoutRate.value.value, rps) : null
+
+  return {
+    requestsPerSecond: rps,
+    errorPercent,
+    errorElevated: errorPercent !== null && errorPercent > ERROR_RATE_THRESHOLD,
+    timeoutPercent,
+    timeoutElevated: timeoutPercent !== null && timeoutPercent > TIMEOUT_RATE_THRESHOLD,
   }
 }
 

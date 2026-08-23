@@ -2,12 +2,18 @@
 import { computed, onMounted, ref } from 'vue'
 import { metricsFor } from './spec.js'
 import { appFor } from './apps.js'
-import { partitionMetricFamilies, groupDiskMetricsByDisk, groupHaproxyMetricsByBackend } from './metrics.js'
+import {
+  partitionMetricFamilies,
+  groupDiskMetricsByDisk,
+  groupHaproxyMetricsByBackend,
+  groupSolrMetricsByHandler,
+} from './metrics.js'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
 import DiskBadge from './DiskBadge.vue'
 import HaproxyBadge from './HaproxyBadge.vue'
+import SolrBadge from './SolrBadge.vue'
 
 const props = defineProps({
   vm: { type: Object, required: true },
@@ -31,16 +37,23 @@ const hasMetrics = computed(
     otherMetrics.value.length
 )
 
-// A container can carry its own metrics too (currently just haproxy-*,
-// see stack.yaml) — unlike the VM-level families above, these are specific
-// to one container, so they're keyed by container id rather than being a
+// A container can carry its own metrics too (haproxy-*/solr-*, see
+// stack.yaml) — unlike the VM-level families above, these are specific to
+// one container, so they're keyed by container id rather than being a
 // single flat list.
+const containerFamiliesById = computed(() =>
+  Object.fromEntries(
+    props.vm.containers.map((c) => [c.id, partitionMetricFamilies(metricsFor(c, 'container'))])
+  )
+)
 const haproxyGroupsByContainer = computed(() =>
   Object.fromEntries(
-    props.vm.containers.map((c) => [
-      c.id,
-      groupHaproxyMetricsByBackend(partitionMetricFamilies(metricsFor(c, 'container')).haproxyMetrics),
-    ])
+    props.vm.containers.map((c) => [c.id, groupHaproxyMetricsByBackend(containerFamiliesById.value[c.id].haproxyMetrics)])
+  )
+)
+const solrGroupsByContainer = computed(() =>
+  Object.fromEntries(
+    props.vm.containers.map((c) => [c.id, groupSolrMetricsByHandler(containerFamiliesById.value[c.id].solrMetrics)])
   )
 )
 
@@ -58,11 +71,9 @@ const haproxyGroupsByContainer = computed(() =>
 const totalBadges = computed(() => {
   const vmBadges =
     (cpuMetrics.value.length ? 1 : 0) + (ramMetrics.value.length ? 1 : 0) + diskGroups.value.length + otherMetrics.value.length
-  const containerBadges = Object.values(haproxyGroupsByContainer.value).reduce(
-    (sum, groups) => sum + groups.length,
-    0
-  )
-  return vmBadges + containerBadges
+  const haproxyBadges = Object.values(haproxyGroupsByContainer.value).reduce((sum, groups) => sum + groups.length, 0)
+  const solrBadges = Object.values(solrGroupsByContainer.value).reduce((sum, groups) => sum + groups.length, 0)
+  return vmBadges + haproxyBadges + solrBadges
 })
 let settledCount = 0
 let hasEmittedSettled = false
@@ -92,6 +103,19 @@ function setCritical(key, isCritical) {
   criticalStatuses.value = next
 }
 const hasCriticalMetric = computed(() => criticalStatuses.value.size > 0)
+
+// Same Map-of-keys pattern as criticalStatuses, for solr handler rows that
+// report themselves empty (see SolrBadge.vue's `isEmpty`) — `v-show`, not
+// `v-if`, on the row in the template so hiding one doesn't unmount (and
+// re-fetch) the badge, just collapses its space; the badge keeps polling
+// in the background in case it stops being empty later.
+const emptyHandlers = ref(new Map())
+function setHandlerEmpty(key, isEmptyValue) {
+  const next = new Map(emptyHandlers.value)
+  if (isEmptyValue) next.set(key, true)
+  else next.delete(key)
+  emptyHandlers.value = next
+}
 
 const rootEl = ref(null)
 const containerEls = {}
@@ -195,6 +219,22 @@ defineExpose({ measure })
               :resource-id="c.id"
               @settled="onBadgeSettled"
               @critical-change="(v) => setCritical('haproxy:' + c.id + ':' + group.backend, v)"
+            />
+          </div>
+        </div>
+        <div v-if="solrGroupsByContainer[c.id].length" class="map-container__metrics">
+          <div
+            v-for="group in solrGroupsByContainer[c.id]"
+            v-show="!emptyHandlers.get(c.id + ':' + group.handler)"
+            :key="'solr-' + group.handler"
+            class="map-container__metrics-row"
+          >
+            <SolrBadge
+              :metrics="group.metrics"
+              :handler="group.handler"
+              :resource-id="c.id"
+              @settled="onBadgeSettled"
+              @empty-change="(v) => setHandlerEmpty(c.id + ':' + group.handler, v)"
             />
           </div>
         </div>
@@ -317,6 +357,26 @@ defineExpose({ measure })
   border-radius: 4px;
   background: #fff;
   padding: 2px 4px;
+}
+
+/* Plain rows for a container's metrics that don't split into distinct
+   sub-resources (currently just solr-*) — no bordered box, just another
+   row, same idea as .map-vm__metrics-row. */
+.map-container__metrics {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 3px;
+}
+
+/* min-height (not a hard height + overflow:hidden) — a badge in here can
+   need a second line (see SolrBadge.vue's error/timeout row), and the box
+   is measured from real DOM geometry rather than assumed, so there's
+   nothing to clip against. */
+.map-container__metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 14px;
 }
 
 .map-container__dot {
