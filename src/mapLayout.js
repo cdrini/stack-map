@@ -42,21 +42,30 @@ function layoutContainerNode(container, measured) {
   return { kind: 'container', id: container.id, container, width: measured.width, height: measured.height }
 }
 
-// VMs within one server, positioned topologically — a server's rectangle
-// is exactly as wide/tall as its own VMs' relationships demand, rather
-// than a fixed grid. `topologyEdges` is VM-to-VM only (buildTopologyEdges(),
-// already projected — see spec.js) filtered down to edges where both ends
-// are hosted here; an edge leaving the server can't meaningfully position
-// anything inside this one box, so it's simply not part of this server's
-// own sub-layout (it's still drawn on the full map, same as any other edge
-// — see MapView.vue's renderedEdges).
-function layoutServerTopo(server, measuredSizes, topologyEdges) {
-  const vmDims = server.vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id)))
-  const vmIds = new Set(vmDims.map((d) => d.id))
-  const localEdges = topologyEdges.filter((e) => vmIds.has(e.from) && vmIds.has(e.to))
-  const topo = computeTopologicalLayout(vmDims, localEdges)
+// The VM (default) or container ("Group by VM" unchecked) dims hosted on
+// one server — the unit computeMapLayout positions within that server's
+// box, either topologically or grid-packed below.
+function unitsForServer(server, granularity, measuredSizes) {
+  if (granularity === 'vm') return server.vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id)))
+  return server.vms.flatMap((vm) => vm.containers).map((c) => layoutContainerNode(c, measuredSizes.get(c.id)))
+}
 
-  const vmPositions = topo.positions.map((p) => ({
+// One server's units (VMs, or containers when "Group by VM" is unchecked),
+// positioned topologically — a server's rectangle is exactly as wide/tall
+// as its own units' relationships demand, rather than a fixed grid.
+// `edges` is already projected down to whichever granularity `units` are
+// at (buildTopologyEdges() for VMs, buildEdges() directly for containers —
+// see computeMapLayout) and filtered here to edges where both ends are
+// hosted on this server; an edge leaving the server can't meaningfully
+// position anything inside this one box, so it's simply not part of this
+// server's own sub-layout (it's still drawn on the full map, same as any
+// other edge — see MapView.vue's renderedEdges).
+function layoutServerTopo(server, units, edges) {
+  const unitIds = new Set(units.map((u) => u.id))
+  const localEdges = edges.filter((e) => unitIds.has(e.from) && unitIds.has(e.to))
+  const topo = computeTopologicalLayout(units, localEdges)
+
+  const unitPositions = topo.positions.map((p) => ({
     ...p,
     x: p.x + SERVER_PADDING,
     y: p.y + SERVER_HEADER + SERVER_PADDING,
@@ -66,23 +75,22 @@ function layoutServerTopo(server, measuredSizes, topologyEdges) {
     kind: 'server',
     id: server.id,
     server,
-    vmPositions,
+    unitPositions,
     width: topo.totalWidth + SERVER_PADDING * 2,
     height: SERVER_HEADER + SERVER_PADDING * 2 + topo.totalHeight,
   }
 }
 
-// VMs within one server, packed into a relationship-blind sqrt-ish grid —
-// the map's original "Group by server" behavior, kept as the "Grid"
-// choice in the layout-algorithm picker (see MapView.vue) now that
-// layoutServerTopo exists as the default.
-function layoutServerGrid(server, measuredSizes) {
-  const vmDims = server.vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id)))
-  const cols = Math.max(1, Math.ceil(Math.sqrt(vmDims.length || 1)))
+// Same units, packed into a relationship-blind sqrt-ish grid instead — the
+// map's original "Group by server" behavior, kept as the "Grid" choice in
+// the layout-algorithm picker (see MapView.vue) now that layoutServerTopo
+// exists as the default.
+function layoutServerGrid(server, units) {
+  const cols = Math.max(1, Math.ceil(Math.sqrt(units.length || 1)))
   const colWidths = []
   const rowHeights = []
 
-  vmDims.forEach((dim, i) => {
+  units.forEach((dim, i) => {
     const col = i % cols
     const row = Math.floor(i / cols)
     colWidths[col] = Math.max(colWidths[col] || 0, dim.width)
@@ -102,7 +110,7 @@ function layoutServerGrid(server, measuredSizes) {
     acc += rowHeights[r] + VM_GAP
   }
 
-  const vmPositions = vmDims.map((dim, i) => {
+  const unitPositions = units.map((dim, i) => {
     const col = i % cols
     const row = Math.floor(i / cols)
     return {
@@ -120,7 +128,7 @@ function layoutServerGrid(server, measuredSizes) {
     kind: 'server',
     id: server.id,
     server,
-    vmPositions,
+    unitPositions,
     width: contentWidth + SERVER_PADDING * 2,
     height: SERVER_HEADER + SERVER_PADDING * 2 + contentHeight,
   }
@@ -152,24 +160,33 @@ function shelfPack(dims, gap, maxRowWidth) {
 }
 
 // "Group by server"'s layout-algorithm picker (see MapView.vue) — 'topo'
-// positions both servers among themselves and VMs within each server by
+// positions both servers among themselves and units within each server by
 // relationship (a container's or VM's relationship is projected all the
 // way up onto the servers hosting the two ends — see spec.js's
 // buildServerTopologyEdges — so e.g. a web VM's server ends up near its
 // database's server), while 'grid' is the map's original relationship-blind
 // packing at both levels. A mix of the two (e.g. topological servers with
-// grid-packed VMs) isn't offered — one algorithm for the whole mode is
+// grid-packed units) isn't offered — one algorithm for the whole mode is
 // simpler to reason about, and there was no request for finer control.
-export function computeMapLayout(tree, measuredSizes, algorithm = 'topo') {
+//
+// `granularity` is the same "Group by VM" axis the ungrouped view has —
+// 'vm' (default) packs VMs into each server's box, 'container' packs the
+// containers hosted on it directly instead, orthogonally to whichever
+// algorithm is chosen. Server-to-server positioning is unaffected either
+// way: buildServerTopologyEdges() already projects straight from raw
+// container-level edges up to servers regardless of what's shown inside
+// them.
+export function computeMapLayout(tree, measuredSizes, algorithm = 'topo', granularity = 'vm') {
+  const unitEdges = granularity === 'vm' ? buildTopologyEdges() : buildEdges()
   if (algorithm === 'grid') {
-    return shelfPack(
-      tree.map((server) => layoutServerGrid(server, measuredSizes)),
-      SERVER_GAP,
-      MAX_ROW_WIDTH
+    const serverDims = tree.map((server) =>
+      layoutServerGrid(server, unitsForServer(server, granularity, measuredSizes))
     )
+    return shelfPack(serverDims, SERVER_GAP, MAX_ROW_WIDTH)
   }
-  const vmTopologyEdges = buildTopologyEdges()
-  const serverDims = tree.map((server) => layoutServerTopo(server, measuredSizes, vmTopologyEdges))
+  const serverDims = tree.map((server) =>
+    layoutServerTopo(server, unitsForServer(server, granularity, measuredSizes), unitEdges)
+  )
   return computeTopologicalLayout(serverDims, buildServerTopologyEdges())
 }
 
@@ -587,20 +604,23 @@ export function computeContainerMapLayout(containers, externals = [], measuredSi
   return computeTopologicalLayout(nodes, buildEdges())
 }
 
-// Absolute (world-coordinate) box for every server, VM, and container id —
-// what relationship edges attach to, regardless of which level they connect.
+// Absolute (world-coordinate) box for every server and unit (VM or
+// container, depending on "Group by VM" — see computeMapLayout's
+// `granularity`) id, plus each VM's own containers when applicable — what
+// relationship edges attach to, regardless of which level they connect.
 export function flattenLayout(layout) {
   const boxes = new Map()
   for (const s of layout.positions) {
     boxes.set(s.server.id, { x: s.x, y: s.y, width: s.width, height: s.height })
-    for (const vp of s.vmPositions) {
-      const vmX = s.x + vp.x
-      const vmY = s.y + vp.y
-      boxes.set(vp.vm.id, { x: vmX, y: vmY, width: vp.width, height: vp.height })
-      for (const cp of vp.containerPositions) {
+    for (const up of s.unitPositions) {
+      const ux = s.x + up.x
+      const uy = s.y + up.y
+      boxes.set(up.id, { x: ux, y: uy, width: up.width, height: up.height })
+      if (up.kind !== 'vm') continue
+      for (const cp of up.containerPositions) {
         boxes.set(cp.container.id, {
-          x: vmX + cp.x,
-          y: vmY + cp.y,
+          x: ux + cp.x,
+          y: uy + cp.y,
           width: cp.width,
           height: cp.height,
         })

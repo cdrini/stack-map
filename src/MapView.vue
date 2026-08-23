@@ -30,19 +30,20 @@ const props = defineProps({
 
 const groupByServer = ref(false)
 // Which algorithm "Group by server" uses to arrange servers among
-// themselves and VMs within each one — see mapLayout.js's computeMapLayout.
+// themselves and units within each one — see mapLayout.js's computeMapLayout.
 const serverLayoutAlgorithm = ref('topo')
 // Unchecking this swaps in the same topological algorithm as the default
 // (ungrouped) view, but with containers themselves as the positioned
 // nodes instead of the VMs hosting them — see mapLayout.js's
-// computeContainerMapLayout. True (containers nested in their VM's box,
-// same as today) is the default so the map's normal look is opt-out, not
-// opt-in. Takes priority over groupByServer when unchecked, since "group
-// VMs by server" and "VMs disappear entirely" don't compose.
+// computeContainerMapLayout/computeMapLayout's `granularity`. True
+// (containers nested in their VM's box, same as today) is the default so
+// the map's normal look is opt-out, not opt-in. Orthogonal to
+// groupByServer — either can be on independently, giving four combinations
+// (ungrouped/grouped × VM/container granularity).
 const groupByVm = ref(true)
 const layoutMode = computed(() => {
-  if (!groupByVm.value) return 'container'
-  return groupByServer.value ? 'server' : 'flat'
+  if (groupByServer.value) return 'server'
+  return groupByVm.value ? 'flat' : 'container'
 })
 
 const tree = computed(() => buildTree())
@@ -203,7 +204,9 @@ const layout = computed(() => {
   }
   if (layoutMode.value === 'flat') return computeFlatMapLayout(tree.value, spec.externals, measuredSizes.value)
 
-  const base = computeMapLayout(tree.value, measuredSizes.value, serverLayoutAlgorithm.value)
+  const granularity = groupByVm.value ? 'vm' : 'container'
+  const sizes = groupByVm.value ? measuredSizes.value : measuredContainerSizes.value
+  const base = computeMapLayout(tree.value, sizes, serverLayoutAlgorithm.value, granularity)
   const shift = externalShift.value
   if (!shift) return base
   return {
@@ -351,15 +354,14 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
       <button @click="reset()">Reset view</button>
       <span class="map-toolbar__readout">{{ Math.round(view.scale * 100) }}%</span>
       <label class="map-toolbar__toggle">
-        <input type="checkbox" v-model="groupByServer" :disabled="!groupByVm" />
+        <input type="checkbox" v-model="groupByServer" />
         Group by server
       </label>
       <select
         v-if="groupByServer"
         v-model="serverLayoutAlgorithm"
         class="map-toolbar__select"
-        :disabled="!groupByVm"
-        title="How 'Group by server' arranges servers among themselves and VMs within each one"
+        title="How 'Group by server' arranges servers among themselves and units within each one"
       >
         <option value="topo">Topological</option>
         <option value="grid">Grid</option>
@@ -479,17 +481,28 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               />
             </div>
 
-            <VmBox
-              v-for="vp in s.vmPositions"
-              :key="vp.vm.id"
-              :vm="vp.vm"
-              :x="vp.x"
-              :y="vp.y"
-              :ref="(el) => setRealVmRef(vp.vm.id, el)"
-              :attached-container-ids="attachedContainerIds"
-              @recheck-size="onRecheckSize"
-              @hover-container="setHoveredContainer"
-            />
+            <template v-for="up in s.unitPositions" :key="up.id">
+              <VmBox
+                v-if="up.kind === 'vm'"
+                :vm="up.vm"
+                :x="up.x"
+                :y="up.y"
+                :ref="(el) => setRealVmRef(up.id, el)"
+                :attached-container-ids="attachedContainerIds"
+                @recheck-size="onRecheckSize"
+                @hover-container="setHoveredContainer"
+              />
+              <ContainerNode
+                v-else
+                :container="up.container"
+                :x="up.x"
+                :y="up.y"
+                :ref="(el) => setRealContainerRef(up.id, el)"
+                :attached-container-ids="attachedContainerIds"
+                @recheck-size="onRecheckSizeContainer"
+                @hover-container="setHoveredContainer"
+              />
+            </template>
           </div>
         </template>
 
