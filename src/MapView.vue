@@ -352,8 +352,24 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 <template>
   <div class="map-view">
     <div class="map-toolbar">
-      <UButton size="sm" color="neutral" variant="outline" @click="zoomBy(1.25)">+</UButton>
-      <UButton size="sm" color="neutral" variant="outline" @click="zoomBy(1 / 1.25)">&minus;</UButton>
+      <UButton
+        size="sm"
+        color="neutral"
+        variant="outline"
+        square
+        icon="i-lucide-plus"
+        aria-label="Zoom in"
+        @click="zoomBy(1.25)"
+      />
+      <UButton
+        size="sm"
+        color="neutral"
+        variant="outline"
+        square
+        icon="i-lucide-minus"
+        aria-label="Zoom out"
+        @click="zoomBy(1 / 1.25)"
+      />
       <UButton size="sm" color="neutral" variant="outline" @click="reset()">Reset view</UButton>
       <span class="map-toolbar__readout">{{ Math.round(view.scale * 100) }}%</span>
       <UCheckbox v-model="groupByServer" label="Group by server" />
@@ -380,11 +396,11 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
         color="neutral"
         variant="outline"
         square
+        icon="i-lucide-rotate-ccw"
+        aria-label="Force refresh"
         title="Force refresh (bypasses the cache)"
         @click="forceRefresh"
-      >
-        &#x27F3;
-      </UButton>
+      />
       <svg
         v-else
         class="map-toolbar__refresh-arc"
