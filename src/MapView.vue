@@ -14,6 +14,9 @@ import {
 } from './mapLayout.js'
 import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
+import UButton from '@nuxt/ui/components/Button.vue'
+import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
+import USelect from '@nuxt/ui/components/Select.vue'
 import VmBox from './VmBox.vue'
 import ExternalNode from './ExternalNode.vue'
 import ContainerNode from './ContainerNode.vue'
@@ -349,39 +352,39 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 <template>
   <div class="map-view">
     <div class="map-toolbar">
-      <button @click="zoomBy(1.25)">+</button>
-      <button @click="zoomBy(1 / 1.25)">&minus;</button>
-      <button @click="reset()">Reset view</button>
+      <UButton size="sm" color="neutral" variant="outline" @click="zoomBy(1.25)">+</UButton>
+      <UButton size="sm" color="neutral" variant="outline" @click="zoomBy(1 / 1.25)">&minus;</UButton>
+      <UButton size="sm" color="neutral" variant="outline" @click="reset()">Reset view</UButton>
       <span class="map-toolbar__readout">{{ Math.round(view.scale * 100) }}%</span>
-      <label class="map-toolbar__toggle">
-        <input type="checkbox" v-model="groupByServer" />
-        Group by server
-      </label>
-      <select
+      <UCheckbox v-model="groupByServer" label="Group by server" />
+      <USelect
         v-if="groupByServer"
         v-model="serverLayoutAlgorithm"
+        size="sm"
         class="map-toolbar__select"
+        :items="[
+          { label: 'Topological', value: 'topo' },
+          { label: 'Grid', value: 'grid' },
+        ]"
         title="How 'Group by server' arranges servers among themselves and units within each one"
-      >
-        <option value="topo">Topological</option>
-        <option value="grid">Grid</option>
-      </select>
-      <label class="map-toolbar__toggle" title="Unchecking positions containers themselves via the same topological algorithm, instead of nesting them in their VM's box">
-        <input type="checkbox" v-model="groupByVm" />
-        Group by VM
-      </label>
-      <label class="map-toolbar__toggle">
-        <input type="checkbox" v-model="liveRefreshEnabled" />
-        Live refresh (30s)
-      </label>
-      <button
+      />
+      <UCheckbox
+        v-model="groupByVm"
+        label="Group by VM"
+        title="Unchecking positions containers themselves via the same topological algorithm, instead of nesting them in their VM's box"
+      />
+      <UCheckbox v-model="liveRefreshEnabled" label="Live refresh (30s)" />
+      <UButton
         v-if="!isRefreshing"
-        class="map-toolbar__refresh-btn"
+        size="sm"
+        color="neutral"
+        variant="outline"
+        square
         title="Force refresh (bypasses the cache)"
         @click="forceRefresh"
       >
         &#x27F3;
-      </button>
+      </UButton>
       <svg
         v-else
         class="map-toolbar__refresh-arc"
@@ -664,63 +667,14 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   padding-bottom: 0.75rem;
 }
 
-.map-toolbar button {
-  font-size: 0.85rem;
-  padding: 0.3rem 0.7rem;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #0f172a;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.map-toolbar button:hover {
-  background: #f1f5f9;
-}
-
-.map-toolbar__select {
-  font-size: 0.85rem;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #0f172a;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.map-toolbar__select:disabled {
-  color: #94a3b8;
-  cursor: not-allowed;
-}
-
 .map-toolbar__readout {
   font-size: 0.8rem;
   color: #64748b;
   min-width: 3.5rem;
 }
 
-.map-toolbar__toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.85rem;
-  color: #334155;
-  cursor: pointer;
-}
-
-/* Fixed footprint matching the arc it swaps places with (below), so
-   clicking it doesn't visibly shift the rest of the toolbar. Selector
-   matches .map-toolbar button's specificity so this padding override
-   doesn't need !important. */
-.map-toolbar button.map-toolbar__refresh-btn {
-  width: 27px;
-  height: 27px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.95rem;
-  line-height: 1;
+.map-toolbar__select {
+  min-width: 9rem;
 }
 
 .map-toolbar__refresh-arc {

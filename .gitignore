@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Regenerated on every dev server run by @nuxt/ui's Vite plugin
+# (unplugin-auto-import / unplugin-vue-components), purely for editor
+# type-checking — not meant to be hand-edited or committed.
+auto-imports.d.ts
+components.d.ts
+
 # Names real internal Archive infrastructure — never committed. Path is
 # configurable via STACKMAP_SPEC_PATH (see server/env.py); this default
 # location is just where local dev expects to find it.

@@ -1,5 +1,7 @@
 <script setup>
 import { ref } from 'vue'
+import UApp from '@nuxt/ui/components/App.vue'
+import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import MapView from './MapView.vue'
 import CpuExplainerModal from './CpuExplainerModal.vue'
 import DiskExplainerModal from './DiskExplainerModal.vue'
@@ -9,26 +11,25 @@ const hoverDimEnabled = ref(true)
 </script>
 
 <template>
-  <div class="app-shell">
-    <header class="app-header">
-      <div>
-        <h1>Stack Map</h1>
-        <p class="app-header__subtitle">
-          Baremetal &rarr; VM &rarr; container topology, with live Graphite metrics starting on CPU.
-        </p>
-      </div>
-      <label class="app-header__toggle">
-        <input type="checkbox" v-model="hoverDimEnabled" />
-        Dim unrelated on hover
-      </label>
-    </header>
+  <UApp>
+    <div class="app-shell">
+      <header class="app-header">
+        <div>
+          <h1>Stack Map</h1>
+          <p class="app-header__subtitle">
+            Baremetal &rarr; VM &rarr; container topology, with live Graphite metrics starting on CPU.
+          </p>
+        </div>
+        <UCheckbox v-model="hoverDimEnabled" label="Dim unrelated on hover" class="app-header__toggle" />
+      </header>
 
-    <MapView :hover-dim-enabled="hoverDimEnabled" />
+      <MapView :hover-dim-enabled="hoverDimEnabled" />
 
-    <CpuExplainerModal />
-    <DiskExplainerModal />
-    <RamExplainerModal />
-  </div>
+      <CpuExplainerModal />
+      <DiskExplainerModal />
+      <RamExplainerModal />
+    </div>
+  </UApp>
 </template>
 
 <style scoped>
@@ -56,13 +57,6 @@ const hoverDimEnabled = ref(true)
 }
 
 .app-header__toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.85rem;
-  color: #334155;
-  cursor: pointer;
-  white-space: nowrap;
   margin-top: 0.3rem;
 }
 </style>

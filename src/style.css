@@ -1,3 +1,6 @@
+@import 'tailwindcss';
+@import '@nuxt/ui';
+
 :root {
   /* This app only has a light design so far — "light dark" here would let
      browsers auto-apply dark-mode form control colors (e.g. white button
