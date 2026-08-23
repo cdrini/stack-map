@@ -58,6 +58,14 @@ function cacheKey(source, query) {
   return `${source}::${query}`
 }
 
+// For the toolbar's manual refresh button — bypasses the 30s window
+// entirely so a forced refresh actually re-fetches everything, rather than
+// just re-triggering `load()` calls that immediately resolve from a cache
+// that hasn't expired yet.
+export function clearResultCache() {
+  resultCache.clear()
+}
+
 // Every badge on the map calls fetchLatestMetric independently, but they
 // mostly do it in synchronized bursts — everything fetches once on mount,
 // then again together on every liveRefresh tick (they all watch the same

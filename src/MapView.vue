@@ -1,8 +1,8 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { spec, buildTree, buildEdges, metricsFor } from './spec.js'
-import { partitionMetricFamilies, pendingRequestCount, pendingRequestTotal } from './metrics.js'
-import { liveRefreshEnabled } from './liveRefresh.js'
+import { partitionMetricFamilies, pendingRequestCount, pendingRequestTotal, clearResultCache } from './metrics.js'
+import { liveRefreshEnabled, refreshTick } from './liveRefresh.js'
 import {
   computeMapLayout,
   computeFlatMapLayout,
@@ -37,6 +37,15 @@ const refreshProgress = computed(() =>
     ? (pendingRequestTotal.value - pendingRequestCount.value) / pendingRequestTotal.value
     : 0
 )
+
+// Cache eviction is what makes this an actual forced refresh rather than a
+// no-op — a plain refreshTick bump alone would just re-trigger `load()`
+// calls that immediately resolve from whatever's still within the normal
+// 30s window.
+function forceRefresh() {
+  clearResultCache()
+  refreshTick.value++
+}
 
 // Every VM's real size, measured from the DOM (see VmBox.vue's `measure()`)
 // rather than predicted from constants — vm.id -> { width, height,
@@ -237,29 +246,37 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
       <label class="map-toolbar__toggle">
         <input type="checkbox" v-model="liveRefreshEnabled" />
         Live refresh (30s)
-        <svg
-          v-if="isRefreshing"
-          class="map-toolbar__refresh-arc"
-          viewBox="0 0 16 16"
-          width="15"
-          height="15"
-          :title="`fetching updated metrics… (${pendingRequestTotal - pendingRequestCount}/${pendingRequestTotal})`"
-        >
-          <circle class="map-toolbar__refresh-arc-track" cx="8" cy="8" :r="REFRESH_ARC_RADIUS" fill="none" stroke-width="3" />
-          <circle
-            class="map-toolbar__refresh-arc-fill"
-            cx="8"
-            cy="8"
-            :r="REFRESH_ARC_RADIUS"
-            fill="none"
-            stroke-width="3"
-            stroke-linecap="round"
-            :stroke-dasharray="REFRESH_ARC_CIRCUMFERENCE"
-            :stroke-dashoffset="REFRESH_ARC_CIRCUMFERENCE * (1 - refreshProgress)"
-            transform="rotate(-90 8 8)"
-          />
-        </svg>
       </label>
+      <button
+        v-if="!isRefreshing"
+        class="map-toolbar__refresh-btn"
+        title="Force refresh (bypasses the cache)"
+        @click="forceRefresh"
+      >
+        &#x27F3;
+      </button>
+      <svg
+        v-else
+        class="map-toolbar__refresh-arc"
+        viewBox="0 0 16 16"
+        width="15"
+        height="15"
+        :title="`fetching updated metrics… (${pendingRequestTotal - pendingRequestCount}/${pendingRequestTotal})`"
+      >
+        <circle class="map-toolbar__refresh-arc-track" cx="8" cy="8" :r="REFRESH_ARC_RADIUS" fill="none" stroke-width="3" />
+        <circle
+          class="map-toolbar__refresh-arc-fill"
+          cx="8"
+          cy="8"
+          :r="REFRESH_ARC_RADIUS"
+          fill="none"
+          stroke-width="3"
+          stroke-linecap="round"
+          :stroke-dasharray="REFRESH_ARC_CIRCUMFERENCE"
+          :stroke-dashoffset="REFRESH_ARC_CIRCUMFERENCE * (1 - refreshProgress)"
+          transform="rotate(-90 8 8)"
+        />
+      </svg>
       <span class="map-toolbar__hint">scroll to zoom, drag to pan</span>
     </div>
 
@@ -473,6 +490,25 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   font-size: 0.85rem;
   color: #334155;
   cursor: pointer;
+}
+
+/* Fixed footprint matching the arc it swaps places with (below), so
+   clicking it doesn't visibly shift the rest of the toolbar. Selector
+   matches .map-toolbar button's specificity so this padding override
+   doesn't need !important. */
+.map-toolbar button.map-toolbar__refresh-btn {
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.map-toolbar__refresh-arc {
+  flex: none;
 }
 
 .map-toolbar__refresh-arc-track {
