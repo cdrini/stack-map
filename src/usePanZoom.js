@@ -50,8 +50,13 @@ export function usePanZoom(initial) {
     // Without capture, a finger that drags outside the viewport's bounds
     // stops delivering pointermove/up to it, leaving `dragging`/`pointers`
     // stuck on — capturing to the element itself keeps events coming
-    // regardless of where the finger ends up.
-    e.currentTarget.setPointerCapture(e.pointerId)
+    // regardless of where the finger ends up. Mouse is excluded: capturing
+    // it too redirects the resulting compatibility click event's target to
+    // the viewport itself, which broke click-to-open on the CPU/RAM/disk
+    // badges nested inside it.
+    if (e.pointerType !== 'mouse') {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     if (pointers.size === 2) {
