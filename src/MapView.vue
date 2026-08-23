@@ -444,6 +444,7 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointerleave="onPointerUp"
+      @pointercancel="onPointerUp"
     >
       <div
         class="map-grid"
