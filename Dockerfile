@@ -21,7 +21,7 @@ RUN npm run build -- --base="$BASE_PATH"
 # uv is only ever needed to build the venv below, never at runtime — kept
 # in its own stage so its own (surprisingly large — the PyPI package bundles
 # a full Rust binary) install cost never ends up in the shipped image.
-FROM python:3.14-slim AS deps-builder
+FROM python:3.14-alpine AS deps-builder
 # uv from PyPI rather than ghcr.io's own image — a plain `pip install` also
 # works for a host that only has registry access to PyPI/Docker Hub, not ghcr.io.
 RUN pip install --no-cache-dir uv
@@ -30,7 +30,7 @@ COPY server/pyproject.toml server/uv.lock ./
 RUN uv sync --frozen
 
 # ---- API server, also serving the built frontend ----
-FROM python:3.14-slim AS runtime
+FROM python:3.14-alpine AS runtime
 WORKDIR /app
 COPY --from=deps-builder /app/.venv ./.venv
 COPY server/env.py server/main.py ./
