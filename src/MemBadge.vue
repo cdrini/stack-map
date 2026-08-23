@@ -10,6 +10,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ramBusyColor, isRamBusyCritical, fetchRamMetrics, formatGiB } from './metrics.js'
 import { refreshTick } from './liveRefresh.js'
+import { openRamExplainer } from './ramExplainer.js'
 
 const props = defineProps({
   metrics: { type: Array, required: true },
@@ -21,6 +22,7 @@ const emit = defineEmits(['settled', 'critical-change'])
 const status = ref('loading') // 'loading' | 'ok' | 'error'
 const busy = ref(null)
 const usedBytes = ref(null)
+const cachedBytes = ref(null)
 const totalBytes = ref(null)
 const swapPercent = ref(null)
 const swapElevated = ref(false)
@@ -39,6 +41,7 @@ async function load() {
     const data = await fetchRamMetrics(props.metrics, props.resourceId)
     busy.value = data.busy
     usedBytes.value = data.usedBytes
+    cachedBytes.value = data.cachedBytes
     totalBytes.value = data.totalBytes
     swapPercent.value = data.swapPercent
     swapElevated.value = data.swapElevated
@@ -60,7 +63,18 @@ watch(refreshTick, load)
 </script>
 
 <template>
-  <div class="mem-badge" :title="status === 'error' ? `fetch failed: ${errorMessage}` : 'RAM: used + non-reclaimable slab, as % of total'">
+  <div
+    class="mem-badge"
+    role="button"
+    tabindex="0"
+    :title="
+      (status === 'error'
+        ? `fetch failed: ${errorMessage}`
+        : 'RAM: used+non-reclaimable slab / cached / total') + ' — click for what these mean'
+    "
+    @click="openRamExplainer()"
+    @keydown.enter="openRamExplainer()"
+  >
     <span class="mem-badge__label">MEM:</span>
     <span v-if="status === 'loading'" class="mem-badge__chip mem-badge__chip--loading">…</span>
     <span
@@ -69,7 +83,9 @@ watch(refreshTick, load)
       :class="{ 'mem-badge__chip--plain': color.plain }"
       :style="color.plain ? null : { color: color.color, background: color.background }"
     >
-      {{ formatGiB(usedBytes, 1) }} / {{ formatGiB(totalBytes, 1) }}GB ({{ busy.toFixed(0) }}%)
+      {{ formatGiB(usedBytes, 1) }} / {{ formatGiB(cachedBytes, 1) }} / {{ formatGiB(totalBytes, 1) }}GB ({{
+        busy.toFixed(0)
+      }}%)
     </span>
     <span v-else class="mem-badge__chip mem-badge__chip--error">unreachable?</span>
 
@@ -88,6 +104,12 @@ watch(refreshTick, load)
   display: flex;
   align-items: center;
   gap: 3px;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.mem-badge:hover {
+  outline: 1px solid #cbd5e1;
 }
 
 .mem-badge__label {

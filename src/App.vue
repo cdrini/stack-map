@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import MapView from './MapView.vue'
 import CpuExplainerModal from './CpuExplainerModal.vue'
 import DiskExplainerModal from './DiskExplainerModal.vue'
+import RamExplainerModal from './RamExplainerModal.vue'
 
 const hoverDimEnabled = ref(true)
 </script>
@@ -26,6 +27,7 @@ const hoverDimEnabled = ref(true)
 
     <CpuExplainerModal />
     <DiskExplainerModal />
+    <RamExplainerModal />
   </div>
 </template>
 

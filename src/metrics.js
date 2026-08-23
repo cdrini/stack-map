@@ -367,6 +367,12 @@ export async function fetchRamMetrics(ramMetrics, resourceId) {
   return {
     busy,
     usedBytes: usedB + slabUnreclB,
+    // Reclaimable (Linux hands it back instantly under pressure, hence
+    // excluded from `used`/`busy` above), but still worth showing
+    // separately — "free" alone undercounts how much RAM is actually
+    // available in practice, since most of a healthy box's page cache
+    // shows up here rather than as truly idle memory.
+    cachedBytes: cachedB,
     totalBytes: total,
     swapPercent,
     swapElevated: swapPercent !== null && swapPercent > SWAP_THRESHOLD,
