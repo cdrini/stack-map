@@ -6,6 +6,7 @@ import { liveRefreshEnabled, refreshTick } from './liveRefresh.js'
 import {
   computeMapLayout,
   computeFlatMapLayout,
+  computeContainerMapLayout,
   flattenLayout,
   flattenFlatLayout,
   rightSidePoints,
@@ -15,6 +16,7 @@ import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
 import VmBox from './VmBox.vue'
 import ExternalNode from './ExternalNode.vue'
+import ContainerNode from './ContainerNode.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
@@ -27,8 +29,22 @@ const props = defineProps({
 })
 
 const groupByServer = ref(false)
+// Unchecking this swaps in the same topological algorithm as the default
+// (ungrouped) view, but with containers themselves as the positioned
+// nodes instead of the VMs hosting them — see mapLayout.js's
+// computeContainerMapLayout. True (containers nested in their VM's box,
+// same as today) is the default so the map's normal look is opt-out, not
+// opt-in. Takes priority over groupByServer when unchecked, since "group
+// VMs by server" and "VMs disappear entirely" don't compose.
+const groupByVm = ref(true)
+const layoutMode = computed(() => {
+  if (!groupByVm.value) return 'container'
+  return groupByServer.value ? 'server' : 'flat'
+})
+
 const tree = computed(() => buildTree())
 const allVms = computed(() => tree.value.flatMap((server) => server.vms))
+const allContainers = computed(() => spec.containers)
 
 const isRefreshing = computed(() => pendingRequestCount.value > 0)
 
@@ -65,12 +81,24 @@ function forceRefresh() {
 // come and go based on live traffic) a row appearing/disappearing on any
 // later refresh too.
 const measuredSizes = ref(new Map())
+// Same idea, one level down — a container's own natural size, only
+// meaningful in layoutMode 'container' (see ContainerNode.vue's own
+// measure()). Measured alongside VM sizes in the same calibration pass
+// below rather than lazily on first toggle, so switching into container
+// mode later never has to show a "measuring…" flash of its own.
+const measuredContainerSizes = ref(new Map())
 const initialSizesReady = ref(false)
 
 const calibrationRefs = {}
 function setCalibrationRef(vmId, el) {
   if (el) calibrationRefs[vmId] = el
   else delete calibrationRefs[vmId]
+}
+
+const containerCalibrationRefs = {}
+function setContainerCalibrationRef(containerId, el) {
+  if (el) containerCalibrationRefs[containerId] = el
+  else delete containerCalibrationRefs[containerId]
 }
 
 onMounted(async () => {
@@ -81,6 +109,14 @@ onMounted(async () => {
     if (el) sizes.set(vm.id, el.measure())
   }
   measuredSizes.value = sizes
+
+  const containerSizes = new Map()
+  for (const c of allContainers.value) {
+    const el = containerCalibrationRefs[c.id]
+    if (el) containerSizes.set(c.id, el.measure())
+  }
+  measuredContainerSizes.value = containerSizes
+
   initialSizesReady.value = true
 })
 
@@ -124,6 +160,26 @@ function onRecheckSize(vmId) {
   measuredSizes.value = sizes
 }
 
+const realContainerRefs = {}
+function setRealContainerRef(containerId, el) {
+  if (el) realContainerRefs[containerId] = el
+  else delete realContainerRefs[containerId]
+}
+
+// Same as onRecheckSize, but for a standalone ContainerNode in layoutMode
+// 'container' — no nested containers of its own to diff, so the box-changed
+// check is just its own width/height.
+function onRecheckSizeContainer(containerId) {
+  const el = realContainerRefs[containerId]
+  if (!el) return
+  const measurement = el.measure(view.scale)
+  const prev = measuredContainerSizes.value.get(containerId)
+  if (prev && nearlyEqual(prev.width, measurement.width) && nearlyEqual(prev.height, measurement.height)) return
+  const sizes = new Map(measuredContainerSizes.value)
+  sizes.set(containerId, measurement)
+  measuredContainerSizes.value = sizes
+}
+
 // Grouping by server has no relationship-based ordering at all (VMs are
 // grid-packed inside their server), so externals can't take part in a
 // topology there — they get a fixed row above instead, and the rest of the
@@ -137,7 +193,10 @@ const externalShift = computed(() =>
 
 const layout = computed(() => {
   if (!initialSizesReady.value) return null
-  if (!groupByServer.value) return computeFlatMapLayout(tree.value, spec.externals, measuredSizes.value)
+  if (layoutMode.value === 'container') {
+    return computeContainerMapLayout(allContainers.value, spec.externals, measuredContainerSizes.value)
+  }
+  if (layoutMode.value === 'flat') return computeFlatMapLayout(tree.value, spec.externals, measuredSizes.value)
 
   const base = computeMapLayout(tree.value, measuredSizes.value)
   const shift = externalShift.value
@@ -152,8 +211,8 @@ const layout = computed(() => {
 
 const renderedEdges = computed(() => {
   if (!layout.value) return []
-  const boxes = groupByServer.value ? flattenLayout(layout.value) : flattenFlatLayout(layout.value)
-  if (groupByServer.value) {
+  const boxes = layoutMode.value === 'server' ? flattenLayout(layout.value) : flattenFlatLayout(layout.value)
+  if (layoutMode.value === 'server') {
     for (const ep of externalLayout.value.positions) {
       boxes.set(ep.external.id, { x: ep.x, y: ep.y, width: ep.width, height: ep.height })
     }
@@ -287,8 +346,12 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
       <button @click="reset()">Reset view</button>
       <span class="map-toolbar__readout">{{ Math.round(view.scale * 100) }}%</span>
       <label class="map-toolbar__toggle">
-        <input type="checkbox" v-model="groupByServer" />
+        <input type="checkbox" v-model="groupByServer" :disabled="!groupByVm" />
         Group by server
+      </label>
+      <label class="map-toolbar__toggle" title="Unchecking positions containers themselves via the same topological algorithm, instead of nesting them in their VM's box">
+        <input type="checkbox" v-model="groupByVm" />
+        Group by VM
       </label>
       <label class="map-toolbar__toggle">
         <input type="checkbox" v-model="liveRefreshEnabled" />
@@ -355,7 +418,7 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
         }"
       >
-        <template v-if="groupByServer">
+        <template v-if="layoutMode === 'server'">
           <ExternalNode
             v-for="ep in externalLayout.positions"
             :key="ep.external.id"
@@ -406,6 +469,38 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               @hover-container="setHoveredContainer"
             />
           </div>
+        </template>
+
+        <template v-else-if="layoutMode === 'container'">
+          <div
+            v-if="layout.hasUnconnected && layout.topoHeight > 0"
+            class="map-section-label"
+            :style="{ top: layout.topoHeight + 8 + 'px' }"
+          >
+            no direct relationships
+          </div>
+          <template v-for="node in layout.positions" :key="node.id">
+            <ContainerNode
+              v-if="node.kind === 'container'"
+              :container="node.container"
+              :x="node.x"
+              :y="node.y"
+              :ref="(el) => setRealContainerRef(node.container.id, el)"
+              :attached-container-ids="attachedContainerIds"
+              @recheck-size="onRecheckSizeContainer"
+              @hover-container="setHoveredContainer"
+            />
+            <ExternalNode
+              v-else
+              :external="node.external"
+              :x="node.x"
+              :y="node.y"
+              :width="node.width"
+              :height="node.height"
+              :attached-container-ids="attachedContainerIds"
+              @hover-container="setHoveredContainer"
+            />
+          </template>
         </template>
 
         <template v-else>
@@ -478,12 +573,20 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
       </div>
     </div>
 
-    <!-- Renders every VM's real markup off-screen, unconstrained, purely to
-         read its natural size before the first real layout is computed —
-         see measuredSizes above. Torn down once that's done; it's not kept
-         around as a permanently-hidden duplicate of the real map. -->
+    <!-- Renders every VM's (and, for the "Group by VM" toggle unchecked,
+         every container's own standalone) real markup off-screen, unconstrained,
+         purely to read its natural size before the first real layout is
+         computed — see measuredSizes/measuredContainerSizes above. Torn
+         down once that's done; it's not kept around as a
+         permanently-hidden duplicate of the real map. -->
     <div v-if="!initialSizesReady" class="map-calibration-pool" aria-hidden="true">
       <VmBox v-for="vm in allVms" :key="vm.id" :vm="vm" :ref="(el) => setCalibrationRef(vm.id, el)" />
+      <ContainerNode
+        v-for="c in allContainers"
+        :key="c.id"
+        :container="c"
+        :ref="(el) => setContainerCalibrationRef(c.id, el)"
+      />
     </div>
   </div>
 </template>

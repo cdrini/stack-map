@@ -13,7 +13,7 @@
 // VmBox.vue's own `measure()` and passed in by the caller, so this file
 // never needs to know what a VM box is actually made of.
 
-import { buildTopologyEdges } from './spec.js'
+import { buildEdges, buildTopologyEdges } from './spec.js'
 import { EXTERNAL_NODE_WIDTH, EXTERNAL_NODE_HEIGHT } from './externalLayout.js'
 
 const VM_GAP = 8
@@ -33,6 +33,13 @@ function layoutVm(vm, measured) {
 
 function layoutExternalNode(external) {
   return { kind: 'external', id: external.id, external, width: EXTERNAL_NODE_WIDTH, height: EXTERNAL_NODE_HEIGHT }
+}
+
+// Same shape as layoutVm's return value, minus containerPositions — a
+// container is already the leaf unit when "Group by VM" is unchecked (see
+// computeContainerMapLayout), so there's nothing further to descend into.
+function layoutContainerNode(container, measured) {
+  return { kind: 'container', id: container.id, container, width: measured.width, height: measured.height }
 }
 
 function layoutServer(server, measuredSizes) {
@@ -387,18 +394,23 @@ function findComponents(ids, edges) {
   return components
 }
 
-// Same VMs and containers, but without server grouping, plus `externals`
-// (e.g. "live traffic") — used to pull a VM into the graph (e.g. out of
-// "no direct relationships") without acting as a real dependency hop. An
-// edge from an external doesn't mean "comes after" the way one VM pointing
-// at another does — it's more like "this is where traffic enters" — so it
-// mustn't affect layer depth the way a real VM-to-VM edge does (that would
-// need to cascade to the target's own dependents too, which a simple depth
-// bump doesn't do, and can silently produce a same-column, zero-length
-// edge for anything downstream of the bumped node). So VM depth is
-// computed from VM-to-VM edges only; externals are then rendered in their
-// own fixed column ahead of every VM, regardless of which VM-layer number
-// their targets landed at — a display convention, not something the
+// Nodes (any mix of 'vm'/'container'/'external'-kinded dims — see
+// layoutVm/layoutContainerNode/layoutExternalNode) plus the edges between
+// them, positioned by relationship depth — generic over what the nodes
+// actually represent, which is what lets computeFlatMapLayout and
+// computeContainerMapLayout below share every bit of this logic and differ
+// only in which nodes/edges they hand it (VMs+buildTopologyEdges() vs.
+// containers+buildEdges() directly).
+//
+// An edge from an 'external' node doesn't mean "comes after" the way a
+// real dependency edge does — it's more like "this is where traffic
+// enters" — so it mustn't affect layer depth the way a real edge does
+// (that would need to cascade to the target's own dependents too, which a
+// simple depth bump doesn't do, and can silently produce a same-column,
+// zero-length edge for anything downstream of the bumped node). So depth
+// is computed from non-external edges only; externals are then rendered
+// in their own fixed column ahead of everything else, regardless of which
+// layer their targets landed at — a display convention, not something the
 // dependency graph requires.
 //
 // Each weakly-connected component (see findComponents) is laid out in its
@@ -407,14 +419,8 @@ function findComponents(ids, edges) {
 // space (e.g. both happening to have a layer-0 node) has no edge to hold
 // their relative vertical offset in place, so it ends up arbitrary and,
 // worse, un-anchored drift the alignment sweeps can grow without bound.
-export function computeFlatMapLayout(tree, externals = [], measuredSizes) {
-  const vms = tree.flatMap((server) => server.vms)
-  const nodes = [
-    ...vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id))),
-    ...externals.map(layoutExternalNode),
-  ]
+function computeTopologicalLayout(nodes, edges) {
   const dimsById = new Map(nodes.map((n) => [n.id, n]))
-  const edges = buildTopologyEdges()
 
   const connected = new Set()
   edges.forEach((e) => {
@@ -498,6 +504,33 @@ export function computeFlatMapLayout(tree, externals = [], measuredSizes) {
     topoHeight,
     hasUnconnected: unconnectedIds.length > 0,
   }
+}
+
+// Same VMs and containers, but without server grouping, plus `externals`
+// (e.g. "live traffic") — used to pull a VM into the graph (e.g. out of
+// "no direct relationships") without acting as a real dependency hop.
+export function computeFlatMapLayout(tree, externals = [], measuredSizes) {
+  const vms = tree.flatMap((server) => server.vms)
+  const nodes = [
+    ...vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id))),
+    ...externals.map(layoutExternalNode),
+  ]
+  return computeTopologicalLayout(nodes, buildTopologyEdges())
+}
+
+// Backs the "Group by VM" toggle unchecked: the exact same topological
+// algorithm as computeFlatMapLayout, but with containers themselves as the
+// positioned nodes instead of the VMs hosting them — VM boxes disappear
+// entirely, and every container (pgbouncer, memcached, nginx, ...) becomes
+// its own node wired up by its *own* relationships. Simpler than the VM
+// case in one way: containers are already the graph's real unit, so this
+// uses buildEdges() directly with no VM-projection step.
+export function computeContainerMapLayout(containers, externals = [], measuredSizes) {
+  const nodes = [
+    ...containers.map((c) => layoutContainerNode(c, measuredSizes.get(c.id))),
+    ...externals.map(layoutExternalNode),
+  ]
+  return computeTopologicalLayout(nodes, buildEdges())
 }
 
 // Absolute (world-coordinate) box for every server, VM, and container id —
