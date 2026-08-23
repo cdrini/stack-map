@@ -1,15 +1,11 @@
 <script setup>
+import UModal from '@nuxt/ui/components/Modal.vue'
 import { cpuExplainerOpen, closeCpuExplainer } from './cpuExplainer.js'
 </script>
 
 <template>
-  <div v-if="cpuExplainerOpen" class="cpu-explainer-backdrop" @click.self="closeCpuExplainer()">
-    <div class="cpu-explainer" role="dialog" aria-modal="true" aria-label="CPU metrics explained">
-      <div class="cpu-explainer__header">
-        <h2>CPU metrics</h2>
-        <button class="cpu-explainer__close" @click="closeCpuExplainer()" aria-label="Close">&times;</button>
-      </div>
-
+  <UModal :open="cpuExplainerOpen" title="CPU metrics" @update:open="(v) => !v && closeCpuExplainer()">
+    <template #body>
       <dl class="cpu-explainer__list">
         <dt><span class="cpu-explainer__chip cpu-explainer__chip--busy">Busy</span></dt>
         <dd>
@@ -34,57 +30,11 @@ import { cpuExplainerOpen, closeCpuExplainer } from './cpuExplainer.js'
           could look idle while still being starved. Only shown when it climbs above 5%.
         </dd>
       </dl>
-    </div>
-  </div>
+    </template>
+  </UModal>
 </template>
 
 <style scoped>
-.cpu-explainer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.cpu-explainer {
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
-  padding: 1.25rem 1.5rem 1.5rem;
-  max-width: 420px;
-  width: calc(100% - 2rem);
-}
-
-.cpu-explainer__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.cpu-explainer__header h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  color: #0f172a;
-}
-
-.cpu-explainer__close {
-  border: none;
-  background: none;
-  font-size: 1.4rem;
-  line-height: 1;
-  color: #94a3b8;
-  cursor: pointer;
-  padding: 0 0.25rem;
-}
-
-.cpu-explainer__close:hover {
-  color: #334155;
-}
-
 .cpu-explainer__list {
   margin: 0;
   display: grid;

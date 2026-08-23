@@ -1,15 +1,11 @@
 <script setup>
+import UModal from '@nuxt/ui/components/Modal.vue'
 import { diskExplainerOpen, closeDiskExplainer } from './diskExplainer.js'
 </script>
 
 <template>
-  <div v-if="diskExplainerOpen" class="disk-explainer-backdrop" @click.self="closeDiskExplainer()">
-    <div class="disk-explainer" role="dialog" aria-modal="true" aria-label="Disk metrics explained">
-      <div class="disk-explainer__header">
-        <h2>Disk metrics</h2>
-        <button class="disk-explainer__close" @click="closeDiskExplainer()" aria-label="Close">&times;</button>
-      </div>
-
+  <UModal :open="diskExplainerOpen" title="Disk metrics" @update:open="(v) => !v && closeDiskExplainer()">
+    <template #body>
       <dl class="disk-explainer__list">
         <dt><span class="disk-explainer__chip disk-explainer__chip--busy">Busy</span></dt>
         <dd>
@@ -25,57 +21,11 @@ import { diskExplainerOpen, closeDiskExplainer } from './diskExplainer.js'
           means the disk can't keep up with demand. Only shown when it climbs above 1.
         </dd>
       </dl>
-    </div>
-  </div>
+    </template>
+  </UModal>
 </template>
 
 <style scoped>
-.disk-explainer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.disk-explainer {
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
-  padding: 1.25rem 1.5rem 1.5rem;
-  max-width: 420px;
-  width: calc(100% - 2rem);
-}
-
-.disk-explainer__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.disk-explainer__header h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  color: #0f172a;
-}
-
-.disk-explainer__close {
-  border: none;
-  background: none;
-  font-size: 1.4rem;
-  line-height: 1;
-  color: #94a3b8;
-  cursor: pointer;
-  padding: 0 0.25rem;
-}
-
-.disk-explainer__close:hover {
-  color: #334155;
-}
-
 .disk-explainer__list {
   margin: 0;
   display: grid;

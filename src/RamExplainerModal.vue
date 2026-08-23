@@ -1,15 +1,11 @@
 <script setup>
+import UModal from '@nuxt/ui/components/Modal.vue'
 import { ramExplainerOpen, closeRamExplainer } from './ramExplainer.js'
 </script>
 
 <template>
-  <div v-if="ramExplainerOpen" class="ram-explainer-backdrop" @click.self="closeRamExplainer()">
-    <div class="ram-explainer" role="dialog" aria-modal="true" aria-label="RAM metrics explained">
-      <div class="ram-explainer__header">
-        <h2>RAM metrics</h2>
-        <button class="ram-explainer__close" @click="closeRamExplainer()" aria-label="Close">&times;</button>
-      </div>
-
+  <UModal :open="ramExplainerOpen" title="RAM metrics" @update:open="(v) => !v && closeRamExplainer()">
+    <template #body>
       <dl class="ram-explainer__list">
         <dt><span class="ram-explainer__chip ram-explainer__chip--used">used</span></dt>
         <dd>
@@ -37,57 +33,11 @@ import { ramExplainerOpen, closeRamExplainer } from './ramExplainer.js'
           at all means this VM is genuinely out of RAM, not just "somewhat full."
         </dd>
       </dl>
-    </div>
-  </div>
+    </template>
+  </UModal>
 </template>
 
 <style scoped>
-.ram-explainer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.ram-explainer {
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
-  padding: 1.25rem 1.5rem 1.5rem;
-  max-width: 420px;
-  width: calc(100% - 2rem);
-}
-
-.ram-explainer__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.ram-explainer__header h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  color: #0f172a;
-}
-
-.ram-explainer__close {
-  border: none;
-  background: none;
-  font-size: 1.4rem;
-  line-height: 1;
-  color: #94a3b8;
-  cursor: pointer;
-  padding: 0 0.25rem;
-}
-
-.ram-explainer__close:hover {
-  color: #334155;
-}
-
 .ram-explainer__list {
   margin: 0;
   display: grid;
