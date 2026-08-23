@@ -32,9 +32,28 @@ export function usePanZoom(initial) {
 
   function onWheel(e, viewportEl) {
     e.preventDefault()
-    const rect = viewportEl.getBoundingClientRect()
-    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12
-    zoomAt(e.clientX - rect.left, e.clientY - rect.top, clampScale(view.scale * factor))
+
+    // Trackpad pinch gestures are reported as wheel events with ctrlKey
+    // set — even though no key is actually held — the standard
+    // cross-browser signal apps like Google Maps/Figma use to tell a pinch
+    // apart from a plain scroll; a physical Ctrl+wheel reads the same way,
+    // which is the convention those apps use for mouse users too. Its
+    // deltaY varies continuously with gesture speed rather than arriving
+    // in fixed notches, so it's scaled exponentially (and clamped) instead
+    // of by a flat per-event factor.
+    if (e.ctrlKey) {
+      const rect = viewportEl.getBoundingClientRect()
+      const factor = Math.exp(-Math.max(-50, Math.min(50, e.deltaY)) * 0.01)
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, clampScale(view.scale * factor))
+      return
+    }
+
+    // Anything else — mouse wheel or trackpad two-finger scroll — pans.
+    // Trying to also guess trackpad-vs-mouse from delta shape (fractional/
+    // diagonal vs "clean" integer steps) to zoom on a plain mouse wheel
+    // was too unreliable in practice.
+    view.x -= e.deltaX
+    view.y -= e.deltaY
   }
 
   function pinchGeometry(rect) {
