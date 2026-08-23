@@ -1,11 +1,15 @@
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
 
 export function usePanZoom(initial) {
   const view = reactive({ ...initial })
-  let dragging = false
+  // A ref (not a plain closure variable) so the template can react to
+  // it directly — see MapView.vue's use of it to suspend text selection
+  // only while an actual drag is in progress, rather than disabling
+  // selection on the map wholesale.
+  const dragging = ref(false)
   let start = { x: 0, y: 0, panX: 0, panY: 0 }
 
   // Active pointers currently down, keyed by pointerId. A second
@@ -66,30 +70,36 @@ export function usePanZoom(initial) {
   }
 
   function onPointerDown(e) {
-    // Without capture, a finger that drags outside the viewport's bounds
-    // stops delivering pointermove/up to it, leaving `dragging`/`pointers`
-    // stuck on — capturing to the element itself keeps events coming
-    // regardless of where the finger ends up. Mouse is excluded: capturing
-    // it too redirects the resulting compatibility click event's target to
-    // the viewport itself, which broke click-to-open on the CPU/RAM/disk
-    // badges nested inside it.
-    if (e.pointerType !== 'mouse') {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    }
+    // No pointer capture here — see onPointerMove, which captures lazily
+    // on the first actual move instead.
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     if (pointers.size === 2) {
-      dragging = false
+      dragging.value = false
       const { distance, midX, midY } = pinchGeometry(e.currentTarget.getBoundingClientRect())
       pinch = { startDistance: distance, startScale: view.scale, startPan: { x: view.x, y: view.y }, startMidX: midX, startMidY: midY }
     } else if (pointers.size === 1) {
-      dragging = true
+      dragging.value = true
       start = { x: e.clientX, y: e.clientY, panX: view.x, panY: view.y }
     }
   }
 
   function onPointerMove(e) {
     if (!pointers.has(e.pointerId)) return
+
+    // Captured lazily here, on the first real move, rather than on
+    // pointerdown — a plain click never generates a move at all, so this
+    // leaves a click straight through to whatever's underneath (capturing
+    // on every pointerdown redirected the resulting click event's target
+    // to the viewport itself instead, breaking click-to-open on the
+    // CPU/RAM/disk badges nested inside it). Once an actual drag/pinch is
+    // happening, capturing here keeps events coming regardless of the
+    // cursor crossing an overlapping HUD panel, leaving the viewport's
+    // bounds, or leaving the browser window entirely.
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    }
+
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     if (pointers.size === 2 && pinch) {
@@ -108,7 +118,7 @@ export function usePanZoom(initial) {
       return
     }
 
-    if (!dragging) return
+    if (!dragging.value) return
     view.x = start.panX + (e.clientX - start.x)
     view.y = start.panY + (e.clientY - start.y)
   }
@@ -122,10 +132,10 @@ export function usePanZoom(initial) {
       // so the map doesn't jump.
       const [remaining] = pointers.values()
       start = { x: remaining.x, y: remaining.y, panX: view.x, panY: view.y }
-      dragging = true
+      dragging.value = true
       pinch = null
     } else if (pointers.size === 0) {
-      dragging = false
+      dragging.value = false
       pinch = null
     }
   }
@@ -140,12 +150,12 @@ export function usePanZoom(initial) {
 
   return {
     view,
+    dragging,
     onWheel,
     onPointerDown,
     onPointerMove,
     onPointerUp,
     zoomBy,
     reset,
-    isDragging: () => dragging,
   }
 }

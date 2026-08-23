@@ -337,7 +337,7 @@ const attachedContainerIds = computed(() => {
 })
 
 const viewportEl = ref(null)
-const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset } = usePanZoom({
+const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset } = usePanZoom({
   x: 24,
   y: 24,
   scale: 0.85,
@@ -438,6 +438,7 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 
     <div
       class="map-viewport"
+      :class="{ 'map-viewport--panning': dragging }"
       ref="viewportEl"
       @wheel="onWheel($event, viewportEl)"
       @pointerdown="onPointerDown"
@@ -836,6 +837,15 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 
 .map-viewport:active {
   cursor: grabbing;
+}
+
+/* A click-drag pan otherwise reads to the browser as a text-selection
+   drag — this suspends selection only for the duration of an actual drag
+   (see usePanZoom.js's `dragging`), rather than disabling it on the map
+   wholesale, so text is still normally selectable. */
+.map-viewport--panning {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .map-world {
