@@ -1,7 +1,10 @@
 <script setup>
+import { ref } from 'vue'
 import MapView from './MapView.vue'
 import CpuExplainerModal from './CpuExplainerModal.vue'
 import DiskExplainerModal from './DiskExplainerModal.vue'
+
+const hoverDimEnabled = ref(true)
 </script>
 
 <template>
@@ -13,9 +16,13 @@ import DiskExplainerModal from './DiskExplainerModal.vue'
           Baremetal &rarr; VM &rarr; container topology, with live Graphite metrics starting on CPU.
         </p>
       </div>
+      <label class="app-header__toggle">
+        <input type="checkbox" v-model="hoverDimEnabled" />
+        Dim unrelated on hover
+      </label>
     </header>
 
-    <MapView />
+    <MapView :hover-dim-enabled="hoverDimEnabled" />
 
     <CpuExplainerModal />
     <DiskExplainerModal />
@@ -44,5 +51,16 @@ import DiskExplainerModal from './DiskExplainerModal.vue'
 .app-header__subtitle {
   margin: 0;
   color: #64748b;
+}
+
+.app-header__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: 0.3rem;
 }
 </style>

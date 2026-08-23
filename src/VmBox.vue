@@ -19,9 +19,13 @@ const props = defineProps({
   vm: { type: Object, required: true },
   x: { type: Number, default: 0 },
   y: { type: Number, default: 0 },
+  // The hovered container (elsewhere on the map, possibly this box) plus
+  // everything it has a direct relationship with — null when nothing's
+  // hovered, meaning no dimming. See MapView.vue's attachedContainerIds.
+  attachedContainerIds: { type: Set, default: null },
 })
 
-const emit = defineEmits(['recheck-size'])
+const emit = defineEmits(['recheck-size', 'hover-container'])
 
 const families = computed(() => partitionMetricFamilies(metricsFor(props.vm, 'vm')))
 const cpuMetrics = computed(() => families.value.cpuMetrics)
@@ -104,6 +108,15 @@ function setCritical(key, isCritical) {
 }
 const hasCriticalMetric = computed(() => criticalStatuses.value.size > 0)
 
+// Dims the whole box, not just its containers, once none of them are
+// attached to whatever's hovered — including a VM with no containers at
+// all, which is equally unrelated. `every` is vacuously true for an empty
+// list, so that case falls out for free. Short-circuits to a falsy null
+// (not true) when nothing's hovered, since attachedContainerIds is null then.
+const allContainersDimmed = computed(
+  () => props.attachedContainerIds && props.vm.containers.every((c) => !props.attachedContainerIds.has(c.id))
+)
+
 // Same Map-of-keys pattern as criticalStatuses, for solr handler rows that
 // report themselves empty (see SolrBadge.vue's `isEmpty`) — `v-show`, not
 // `v-if`, on the row in the template so hiding one doesn't unmount (and
@@ -163,7 +176,7 @@ defineExpose({ measure })
   <div
     ref="rootEl"
     class="map-vm"
-    :class="{ 'map-vm--critical': hasCriticalMetric }"
+    :class="{ 'map-vm--critical': hasCriticalMetric, 'map-vm--dimmed': allContainersDimmed }"
     :style="{ left: x + 'px', top: y + 'px' }"
   >
     <div class="map-vm__header">
@@ -211,6 +224,9 @@ defineExpose({ measure })
         :key="c.id"
         :ref="(el) => setContainerEl(c.id, el)"
         class="map-container"
+        :class="{ 'map-container--dimmed': attachedContainerIds && !attachedContainerIds.has(c.id) }"
+        @mouseenter="emit('hover-container', c.id)"
+        @mouseleave="emit('hover-container', null)"
       >
         <div class="map-container__header" :title="c.role || c.image">
           <img
@@ -265,6 +281,7 @@ defineExpose({ measure })
   border-radius: 7px;
   box-sizing: border-box;
   padding: 4px 6px;
+  transition: opacity 0.15s;
 }
 
 /* Matches the red used by every badge's own top tier / error chip — any
@@ -272,6 +289,13 @@ defineExpose({ measure })
    red is worth noticing from a glance at the whole map, not just up close. */
 .map-vm--critical {
   border: 2px solid #b91c1c;
+}
+
+/* Compounds with any still-dimmed .map-container--dimmed children inside
+   (opacity multiplies down the tree), which is fine here — a VM with
+   nothing attached to the hovered container is meant to all but disappear. */
+.map-vm--dimmed {
+  opacity: 0.3;
 }
 
 .map-vm__header {
@@ -344,6 +368,11 @@ defineExpose({ measure })
   background: #fafafa;
   color: #334155;
   box-sizing: border-box;
+  transition: opacity 0.15s;
+}
+
+.map-container--dimmed {
+  opacity: 0.3;
 }
 
 .map-container__header {

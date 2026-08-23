@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { spec, buildTree, buildEdges, metricsFor } from './spec.js'
 import { partitionMetricFamilies, pendingRequestCount, pendingRequestTotal, clearResultCache } from './metrics.js'
 import { liveRefreshEnabled, refreshTick } from './liveRefresh.js'
@@ -18,6 +18,13 @@ import ExternalNode from './ExternalNode.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
+
+const props = defineProps({
+  // App-level toggle (see App.vue) — kept as a prop rather than read here
+  // directly so this component doesn't need its own opinion on where the
+  // setting lives or how it's persisted.
+  hoverDimEnabled: { type: Boolean, default: true },
+})
 
 const groupByServer = ref(false)
 const tree = computed(() => buildTree())
@@ -216,6 +223,8 @@ const renderedEdges = computed(() => {
 
     edges.push({
       id: `${edge.from}=>${edge.to}`,
+      from: edge.from,
+      to: edge.to,
       path: `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${p2.x} ${p2.y}`,
       labelX,
       labelY,
@@ -223,6 +232,43 @@ const renderedEdges = computed(() => {
     })
   }
   return edges
+})
+
+// Set by a VmBox's container chip on hover (see its @hover-container),
+// cleared on mouseleave — read directly in the template rather than folded
+// into renderedEdges, so hovering doesn't force the edges' geometry
+// (fanning, bezier curves) to recompute on every mouse move.
+const hoveredContainerId = ref(null)
+function setHoveredContainer(id) {
+  // Ignored (rather than gating every consumer of hoveredContainerId
+  // individually) when the App-level toggle is off, so it just never gets
+  // set in the first place — nothing downstream needs its own awareness of
+  // the setting.
+  hoveredContainerId.value = props.hoverDimEnabled ? id : null
+}
+// Also clears immediately if the toggle is switched off mid-hover, rather
+// than waiting for the next mouseleave/mouseenter to notice.
+watch(
+  () => props.hoverDimEnabled,
+  (enabled) => {
+    if (!enabled) hoveredContainerId.value = null
+  }
+)
+
+// The hovered container plus everything it has a direct relationship
+// with (either direction) — null when nothing's hovered, meaning "don't
+// dim anything". Passed down to every VmBox so it can dim its own
+// containers that aren't in this set; kept separate from renderedEdges
+// for the same reason as hoveredContainerId itself (buildEdges() here is
+// just a cheap raw scan, not the fanned/curved geometry).
+const attachedContainerIds = computed(() => {
+  if (!hoveredContainerId.value) return null
+  const ids = new Set([hoveredContainerId.value])
+  for (const edge of buildEdges()) {
+    if (edge.from === hoveredContainerId.value) ids.add(edge.to)
+    if (edge.to === hoveredContainerId.value) ids.add(edge.from)
+  }
+  return ids
 })
 
 const viewportEl = ref(null)
@@ -318,6 +364,8 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
             :y="ep.y"
             :width="ep.width"
             :height="ep.height"
+            :attached-container-ids="attachedContainerIds"
+            @hover-container="setHoveredContainer"
           />
           <div
             v-for="s in layout.positions"
@@ -353,7 +401,9 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               :x="vp.x"
               :y="vp.y"
               :ref="(el) => setRealVmRef(vp.vm.id, el)"
+              :attached-container-ids="attachedContainerIds"
               @recheck-size="onRecheckSize"
+              @hover-container="setHoveredContainer"
             />
           </div>
         </template>
@@ -373,7 +423,9 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               :x="node.x"
               :y="node.y"
               :ref="(el) => setRealVmRef(node.vm.id, el)"
+              :attached-container-ids="attachedContainerIds"
               @recheck-size="onRecheckSize"
+              @hover-container="setHoveredContainer"
             />
             <ExternalNode
               v-else
@@ -382,6 +434,8 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               :y="node.y"
               :width="node.width"
               :height="node.height"
+              :attached-container-ids="attachedContainerIds"
+              @hover-container="setHoveredContainer"
             />
           </template>
         </template>
@@ -400,7 +454,15 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               <path d="M0,0 L10,5 L0,10 z" fill="#64748b" />
             </marker>
           </defs>
-          <g v-for="edge in renderedEdges" :key="edge.id">
+          <g
+            v-for="edge in renderedEdges"
+            :key="edge.id"
+            class="map-edge"
+            :class="{
+              'map-edge--dimmed':
+                hoveredContainerId && edge.from !== hoveredContainerId && edge.to !== hoveredContainerId,
+            }"
+          >
             <path
               :d="edge.path"
               fill="none"
@@ -570,6 +632,14 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   left: 0;
   overflow: visible;
   pointer-events: none;
+}
+
+.map-edge {
+  transition: opacity 0.15s;
+}
+
+.map-edge--dimmed {
+  opacity: 0.2;
 }
 
 .map-edge__label {
