@@ -9,6 +9,7 @@ import {
   groupSolrMetricsByHandler,
 } from './metrics.js'
 import { containerMenuItems } from './containerMenu.js'
+import { vmMenuItems } from './vmMenu.js'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
@@ -179,6 +180,7 @@ defineExpose({ measure })
 </script>
 
 <template>
+  <UContextMenu :items="vmMenuItems(vm)" size="sm">
   <div
     ref="rootEl"
     class="map-vm"
@@ -286,6 +288,7 @@ defineExpose({ measure })
     </div>
     <div v-else class="map-vm__empty">no containers</div>
   </div>
+  </UContextMenu>
 </template>
 
 <style scoped>

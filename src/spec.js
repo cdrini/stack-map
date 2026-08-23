@@ -14,6 +14,7 @@ export async function loadSpec() {
   Object.assign(spec, load(await res.text()))
   spec.externals ??= []
   spec.metrics ??= []
+  spec.links ??= []
 }
 
 // Any server, VM, container, or external carries a `relationships: [{ to,
@@ -108,6 +109,22 @@ export function metricsFor(entity, entityType) {
     return disks.map((disk) => ({ ...m, disk, query: m.query.replaceAll('{{disk}}', disk) }))
   })
   return [...ownMetrics, ...expanded]
+}
+
+// Same idea as metricsFor, for an entity's `links: [{ label, url }]` (see
+// stack.yaml's doc comment) — an entity's own links plus whatever
+// top-level `links:` entries match its type via `filter`. `{{id}}` in
+// `url` is left unresolved here (same as metricsFor's `query`) since
+// resolving it needs the entity's own id, supplied by the caller — see
+// resolveLinkUrl.
+export function linksFor(entity, entityType) {
+  const ownLinks = entity.links || []
+  const globalLinks = spec.links.filter((l) => !l.filter?.type || l.filter.type.includes(entityType))
+  return [...ownLinks, ...globalLinks]
+}
+
+export function resolveLinkUrl(link, resourceId) {
+  return link.url.replaceAll('{{id}}', resourceId)
 }
 
 export function buildTree() {
