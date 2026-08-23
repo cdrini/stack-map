@@ -45,9 +45,14 @@ export function resolveMetricQuery(metric, resourceId) {
 // yet either. Keyed on (source, query) rather than resourceId since
 // that's the actual unit of request/response; module-level so it survives
 // component unmount/remount (this file is a singleton for the page).
-// Only successes are cached — an error shouldn't get "stuck" for the
-// whole window when a retry might succeed.
-const resultCache = new Map() // `${source}::${query}` -> { result, fetchedAt }
+// Failures are cached here too, same as successes — a resource with no
+// data at all (e.g. a VM with no collectd agent) fails the exact same way
+// on every retry, so without this every "Group by server" toggle (which
+// remounts every badge) was re-firing, and re-failing, the same doomed
+// request. A stuck error just rides out the same 30s window a stale
+// success would; a manual page reload bypasses the cache entirely if
+// something needs an immediate retry sooner than that.
+const resultCache = new Map() // `${source}::${query}` -> { result, error, fetchedAt }
 
 function cacheKey(source, query) {
   return `${source}::${query}`
@@ -139,7 +144,7 @@ function fetchOne(source, query, resourceId) {
   const key = cacheKey(source, query)
   const cached = resultCache.get(key)
   if (cached && Date.now() - cached.fetchedAt < REFRESH_INTERVAL_MS) {
-    return Promise.resolve(cached.result)
+    return cached.error ? Promise.reject(cached.error) : Promise.resolve(cached.result)
   }
 
   trackPending()
@@ -154,6 +159,7 @@ function fetchOne(source, query, resourceId) {
         resolve(result)
       },
       reject: (err) => {
+        resultCache.set(key, { error: err, fetchedAt: Date.now() })
         untrackPending()
         reject(err)
       },
