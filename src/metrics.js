@@ -1,6 +1,28 @@
+import { ref } from 'vue'
 import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
 
 const API_BASE = 'http://localhost:8000'
+
+// How many metric fetches are outstanding right now, and how many the
+// current batch started with — a cache hit never touches either (nothing's
+// actually being requested), only a genuine pending network round trip
+// does. MapView.vue's toolbar divides the two into a completed fraction
+// for a circular progress indicator, rather than just a binary
+// "refreshing or not". `pendingRequestTotal` resets to 0 once the count
+// drains back to 0, so the next batch starts counting fresh instead of
+// accumulating across refreshes.
+export const pendingRequestTotal = ref(0)
+export const pendingRequestCount = ref(0)
+
+function trackPending() {
+  pendingRequestCount.value++
+  pendingRequestTotal.value++
+}
+
+function untrackPending() {
+  pendingRequestCount.value--
+  if (pendingRequestCount.value === 0) pendingRequestTotal.value = 0
+}
 
 // haproxy-*/solr-* metrics are Prometheus-backed rather than Graphite-backed
 // — this is the one thing that decides which backend endpoint a chunk of
@@ -120,6 +142,7 @@ function fetchOne(source, query, resourceId) {
     return Promise.resolve(cached.result)
   }
 
+  trackPending()
   return new Promise((resolve, reject) => {
     if (!pendingBySource.has(source)) pendingBySource.set(source, [])
     pendingBySource.get(source).push({
@@ -127,9 +150,13 @@ function fetchOne(source, query, resourceId) {
       resourceId,
       resolve: (result) => {
         resultCache.set(key, { result, fetchedAt: Date.now() })
+        untrackPending()
         resolve(result)
       },
-      reject,
+      reject: (err) => {
+        untrackPending()
+        reject(err)
+      },
     })
     scheduleFlush()
   })

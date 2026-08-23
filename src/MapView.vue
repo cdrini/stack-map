@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { spec, buildTree, buildEdges, metricsFor } from './spec.js'
-import { partitionMetricFamilies } from './metrics.js'
+import { partitionMetricFamilies, pendingRequestCount, pendingRequestTotal } from './metrics.js'
 import { liveRefreshEnabled } from './liveRefresh.js'
 import {
   computeMapLayout,
@@ -22,6 +22,21 @@ import MemBadge from './MemBadge.vue'
 const groupByServer = ref(false)
 const tree = computed(() => buildTree())
 const allVms = computed(() => tree.value.flatMap((server) => server.vms))
+
+const isRefreshing = computed(() => pendingRequestCount.value > 0)
+
+// A small ring drawn via stroke-dasharray/-dashoffset — the standard SVG
+// circular-progress trick: a dash pattern exactly one circumference long,
+// offset by the *uncompleted* fraction so what's left visible is the
+// *completed* fraction, filling in clockwise from the top (rotate -90) as
+// the current refresh's batched requests resolve.
+const REFRESH_ARC_RADIUS = 6
+const REFRESH_ARC_CIRCUMFERENCE = 2 * Math.PI * REFRESH_ARC_RADIUS
+const refreshProgress = computed(() =>
+  pendingRequestTotal.value > 0
+    ? (pendingRequestTotal.value - pendingRequestCount.value) / pendingRequestTotal.value
+    : 0
+)
 
 // Every VM's real size, measured from the DOM (see VmBox.vue's `measure()`)
 // rather than predicted from constants — vm.id -> { width, height,
@@ -222,6 +237,28 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
       <label class="map-toolbar__toggle">
         <input type="checkbox" v-model="liveRefreshEnabled" />
         Live refresh (30s)
+        <svg
+          v-if="isRefreshing"
+          class="map-toolbar__refresh-arc"
+          viewBox="0 0 16 16"
+          width="15"
+          height="15"
+          :title="`fetching updated metrics… (${pendingRequestTotal - pendingRequestCount}/${pendingRequestTotal})`"
+        >
+          <circle class="map-toolbar__refresh-arc-track" cx="8" cy="8" :r="REFRESH_ARC_RADIUS" fill="none" stroke-width="3" />
+          <circle
+            class="map-toolbar__refresh-arc-fill"
+            cx="8"
+            cy="8"
+            :r="REFRESH_ARC_RADIUS"
+            fill="none"
+            stroke-width="3"
+            stroke-linecap="round"
+            :stroke-dasharray="REFRESH_ARC_CIRCUMFERENCE"
+            :stroke-dashoffset="REFRESH_ARC_CIRCUMFERENCE * (1 - refreshProgress)"
+            transform="rotate(-90 8 8)"
+          />
+        </svg>
       </label>
       <span class="map-toolbar__hint">scroll to zoom, drag to pan</span>
     </div>
@@ -436,6 +473,17 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   font-size: 0.85rem;
   color: #334155;
   cursor: pointer;
+}
+
+.map-toolbar__refresh-arc-track {
+  stroke: #dbeafe;
+}
+
+.map-toolbar__refresh-arc-fill {
+  stroke: #2563eb;
+  /* Smooths each step as individual requests resolve, rather than the
+     ring visibly jumping forward in a handful of discrete increments. */
+  transition: stroke-dashoffset 0.2s linear;
 }
 
 .map-toolbar__hint {
