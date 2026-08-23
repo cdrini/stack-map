@@ -49,14 +49,14 @@ function forceRefresh() {
 
 // Every VM's real size, measured from the DOM (see VmBox.vue's `measure()`)
 // rather than predicted from constants — vm.id -> { width, height,
-// containers: [{id,x,y,width,height}] }. Populated in two passes: once
-// immediately on mount, from a hidden pool that renders every VM's
-// "loading" state before anything is shown (so the very first layout
-// doesn't have to block on every metric fetch completing); and again, per
-// VM, once its badges' first real fetch has settled (see
-// onFirstMetricsSettled) — correcting the pre-data guess if the box's
-// actual content changed its shape, which today's fixed-height rows never
-// do, but a richer future badge design might.
+// containers: [{id,x,y,width,height}] }. Populated in an initial pass on
+// mount, from a hidden pool that renders every VM's "loading" state before
+// anything is shown (so the very first layout doesn't have to block on
+// every metric fetch completing); then corrected on demand whenever a VM
+// reports its size may have changed (see onRecheckSize) — its badges'
+// first real fetch settling in, or (for solr's per-handler rows, which can
+// come and go based on live traffic) a row appearing/disappearing on any
+// later refresh too.
 const measuredSizes = ref(new Map())
 const initialSizesReady = ref(false)
 
@@ -102,11 +102,12 @@ function boxChanged(prev, next) {
   })
 }
 
-// Only re-measures and updates — never watches continuously (no
-// ResizeObserver) — since a VM's row count is fixed by its spec-configured
-// metrics, not by live data, so nothing should actually change here today;
-// this just guards against a future badge design where it might.
-function onFirstMetricsSettled(vmId) {
+// Re-measures and updates only when told to (no continuous ResizeObserver)
+// — VmBox.vue calls this out specifically: once when a box's badges first
+// settle, and again any time a solr handler row's empty/non-empty status
+// actually flips afterward, since that's the one thing here whose row
+// count depends on live data rather than static spec config.
+function onRecheckSize(vmId) {
   const el = realVmRefs[vmId]
   if (!el) return
   const measurement = el.measure(view.scale)
@@ -352,7 +353,7 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               :x="vp.x"
               :y="vp.y"
               :ref="(el) => setRealVmRef(vp.vm.id, el)"
-              @first-metrics-settled="onFirstMetricsSettled"
+              @recheck-size="onRecheckSize"
             />
           </div>
         </template>
@@ -372,7 +373,7 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
               :x="node.x"
               :y="node.y"
               :ref="(el) => setRealVmRef(node.vm.id, el)"
-              @first-metrics-settled="onFirstMetricsSettled"
+              @recheck-size="onRecheckSize"
             />
             <ExternalNode
               v-else

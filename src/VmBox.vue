@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { metricsFor } from './spec.js'
 import { appFor } from './apps.js'
 import {
@@ -21,7 +21,7 @@ const props = defineProps({
   y: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['first-metrics-settled'])
+const emit = defineEmits(['recheck-size'])
 
 const families = computed(() => partitionMetricFamilies(metricsFor(props.vm, 'vm')))
 const cpuMetrics = computed(() => families.value.cpuMetrics)
@@ -80,7 +80,7 @@ let hasEmittedSettled = false
 function checkAllSettled() {
   if (hasEmittedSettled || settledCount < totalBadges.value) return
   hasEmittedSettled = true
-  emit('first-metrics-settled', props.vm.id)
+  emit('recheck-size', props.vm.id)
 }
 function onBadgeSettled() {
   settledCount++
@@ -111,10 +111,21 @@ const hasCriticalMetric = computed(() => criticalStatuses.value.size > 0)
 // in the background in case it stops being empty later.
 const emptyHandlers = ref(new Map())
 function setHandlerEmpty(key, isEmptyValue) {
+  const wasEmpty = emptyHandlers.value.has(key)
+  if (wasEmpty === isEmptyValue) return
   const next = new Map(emptyHandlers.value)
   if (isEmptyValue) next.set(key, true)
   else next.delete(key)
   emptyHandlers.value = next
+  // A row appearing/disappearing on a LATER refresh (not just the first
+  // load) changes this box's real height just as much as the first-load
+  // case does — measuredSizes only ever got corrected once, on first
+  // settle, so without this an edge could keep pointing at a container's
+  // old position after its box grew or shrank. nextTick so the DOM has
+  // actually applied the v-show flip before anyone re-measures.
+  if (hasEmittedSettled) {
+    nextTick(() => emit('recheck-size', props.vm.id))
+  }
 }
 
 const rootEl = ref(null)
