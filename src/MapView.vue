@@ -716,7 +716,7 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
   backdrop-filter: blur(14px) saturate(1.6);
   border: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow:
-    0 4px 16px rgba(15, 23, 42, 0.12),
+    0 2px 8px rgba(15, 23, 42, 0.12),
     inset 1px 1px 0 rgba(255, 255, 255, 0.8);
   padding: 0.6rem 0.9rem;
 }
@@ -746,36 +746,47 @@ const { view, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset 
 /* Not anchored to any particular edge — floats free above the bottom
    edge, fully rounded on all sides. Sized to its content (inline-flex,
    not the base .map-hud's block-level flex) so it can be wider than
-   .map-hud-bottom-dock and overflow it on narrow screens instead of
-   being squeezed to fit. */
+   .map-hud-bottom-dock and overflow it (rather than being squeezed to
+   fit, or wrapping to a second line) whenever it doesn't fit. */
 .map-hud--bottom-center {
   position: static;
   display: inline-flex;
   border-radius: 999px;
 }
 
+/* Flex items shrink (and their text wraps) before a flex container
+   overflows by default — left alone, that would let labels wrap onto a
+   second line before the dock below ever gets a chance to scroll.
+   Pinning children to their natural width forces the pill to overflow
+   the dock instead, at any viewport width, not just narrow ones. */
+.map-hud--bottom-center > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Lets the dock scroll (rather than just clip) whenever the pill above
+   is too wide for it — always on, not just under the mobile breakpoint
+   below, since the never-wrap rule above can now make the pill overflow
+   at any width. Setting overflow-x here also makes overflow-y compute to
+   auto (never "visible"), which would otherwise clip the pill's own
+   box-shadow/glare where it extends past the dock's bounds — the padding
+   gives that shadow room to render (and, since padding is part of the
+   scrollable area, it stays visible even scrolled to either end). */
+.map-hud-bottom-dock {
+  overflow-x: auto;
+  padding: 1rem;
+}
+
 /* The dock has enough controls that a single row can overflow a
-   phone-width screen — rather than wrapping (which would leave the
-   vertical dividers stranded mid-row), the dock scrolls horizontally so
-   the pill inside can keep its one-line layout at full natural width. */
+   phone-width screen — it scrolls horizontally, edge-to-edge, so the
+   pill inside can keep its one-line layout at full natural width. */
 @media (max-width: 640px) {
   .map-hud-bottom-dock {
     left: 0;
     right: 0;
     bottom: 0;
     transform: none;
-    overflow-x: auto;
     padding: 10px;
-  }
-
-  /* Flex items shrink (and their text wraps) before a flex container
-     overflows by default — that fights the horizontal-scroll behavior
-     above by letting labels wrap onto a second line instead. Pinning
-     children to their natural width forces the pill to overflow the
-     dock (and thus scroll) rather than squeeze them. */
-  .map-hud--bottom-center > * {
-    flex-shrink: 0;
-    white-space: nowrap;
   }
 }
 
