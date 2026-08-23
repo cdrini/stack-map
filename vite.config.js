@@ -38,4 +38,14 @@ export default defineConfig({
     // which already bundles everything via Rollup regardless.
     include: ['reka-ui'],
   },
+  server: {
+    // Dev runs the frontend (this server) and the FastAPI backend as two
+    // separate processes on different ports — proxying /api here lets the
+    // browser fetch it same-origin (see apiBase.js) instead of needing a
+    // hardcoded backend hostname, which broke in Chrome depending on
+    // whether it resolved "localhost" to ::1 or 127.0.0.1.
+    proxy: {
+      '/api': 'http://127.0.0.1:8000',
+    },
+  },
 })

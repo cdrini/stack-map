@@ -1,5 +1,5 @@
 import { load } from 'js-yaml'
-import { API_BASE } from './apiBase.js'
+import { basePrefix } from './apiBase.js'
 
 // Names real internal Archive infrastructure, so it's never bundled into
 // the build (unlike most Vite apps' data) — fetched from the API server at
@@ -9,7 +9,7 @@ import { API_BASE } from './apiBase.js'
 export const spec = {}
 
 export async function loadSpec() {
-  const res = await fetch(`${API_BASE}/api/spec`)
+  const res = await fetch(`${basePrefix}/api/spec`)
   if (!res.ok) throw new Error(`failed to load stack spec: ${res.status}`)
   Object.assign(spec, load(await res.text()))
   spec.externals ??= []

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { API_BASE } from './apiBase.js'
+import { basePrefix } from './apiBase.js'
 import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
 
 // How many metric fetches are outstanding right now, and how many the
@@ -142,7 +142,7 @@ async function fetchChunk(source, items) {
   // one backend — take it from the first item rather than re-deriving it.
   const endpoint = items[0].isPrometheus ? '/api/metrics/prometheus/latest' : '/api/metrics/latest'
   try {
-    const res = await fetch(`${API_BASE}${endpoint}?${params}`)
+    const res = await fetch(`${basePrefix}${endpoint}?${params}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     for (const item of items) {
