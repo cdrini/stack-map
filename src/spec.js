@@ -123,6 +123,93 @@ export function linksFor(entity, entityType) {
   return [...ownLinks, ...globalLinks]
 }
 
+// Backs the "Collapse replica sets" toggle (see stack.yaml's doc comment
+// on `replicaSet`) — only ever called on the ungrouped views' already-
+// flattened VM list, never "Group by server"'s per-server tree, since
+// replica-set members routinely live on different physical servers and
+// can't share one server's box anyway.
+//
+// `vms` must already have `.containers` attached (as buildTree() does).
+// Returns the collapsed VM list (solo VMs untouched, one representative —
+// the lowest-sorted id — per replicaSet group, its `containers` merged
+// and de-duped by `image` across every member) plus a flat list of just
+// those merged containers (for the container-granularity view, which
+// doesn't nest containers inside VMs) and id -> representative-id redirect
+// maps for both levels, for remapping edges that referenced a
+// now-merged-away VM or container — see redirectEdges.
+export function collapseReplicaSets(vms) {
+  const solo = []
+  const groups = new Map()
+  for (const vm of vms) {
+    if (!vm.replicaSet) {
+      solo.push(vm)
+      continue
+    }
+    if (!groups.has(vm.replicaSet)) groups.set(vm.replicaSet, [])
+    groups.get(vm.replicaSet).push(vm)
+  }
+
+  const vmRedirect = new Map()
+  const containerRedirect = new Map()
+  const mergedContainers = []
+
+  const collapsedVms = [...groups.entries()].map(([name, members]) => {
+    const sortedMembers = [...members].sort((a, b) => a.id.localeCompare(b.id))
+    const representative = sortedMembers[0]
+    for (const m of sortedMembers) vmRedirect.set(m.id, representative.id)
+
+    const byImage = new Map()
+    for (const vm of sortedMembers) {
+      for (const c of vm.containers || []) {
+        if (!byImage.has(c.image)) byImage.set(c.image, [])
+        byImage.get(c.image).push(c)
+      }
+    }
+    const containers = [...byImage.values()].map((sameImage) => {
+      const sorted = [...sameImage].sort((a, b) => a.id.localeCompare(b.id))
+      const repContainer = sorted[0]
+      for (const c of sorted) containerRedirect.set(c.id, repContainer.id)
+      const merged = sorted.length > 1 ? { ...repContainer, replicas: sorted.length } : repContainer
+      mergedContainers.push(merged)
+      return merged
+    })
+
+    return { ...representative, containers, replicaSetName: name, replicaSetSize: sortedMembers.length }
+  })
+
+  return { vms: [...solo, ...collapsedVms], mergedContainers, vmRedirect, containerRedirect }
+}
+
+// Every container not swept into a replica-set merge above, plus that
+// merge's own de-duped representatives — the full node list for the
+// container-granularity view once collapsing is on.
+export function collapsedContainers(allContainers, collapseResult) {
+  const untouched = allContainers.filter((c) => !collapseResult.containerRedirect.has(c.id))
+  return [...untouched, ...collapseResult.mergedContainers]
+}
+
+// Remaps an edge list (see buildEdges()/buildTopologyEdges()) through
+// collapseReplicaSets' id -> representative-id maps, so an edge that
+// pointed at a now-merged-away VM/container instead points at its
+// representative — then drops the resulting self-loops (both ends merged
+// into the same representative) and de-duplicates (several group members
+// all queried by the same source collapse to the one edge a viewer
+// actually needs to see).
+export function redirectEdges(edges, redirect) {
+  const seen = new Set()
+  const result = []
+  for (const edge of edges) {
+    const from = redirect.get(edge.from) ?? edge.from
+    const to = redirect.get(edge.to) ?? edge.to
+    if (from === to) continue
+    const key = `${from} ${to} ${edge.label ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push({ ...edge, from, to })
+  }
+  return result
+}
+
 export function resolveLinkUrl(link, resourceId) {
   return link.url.replaceAll('{{id}}', resourceId)
 }

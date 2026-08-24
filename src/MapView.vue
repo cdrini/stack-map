@@ -1,6 +1,15 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { spec, buildTree, buildEdges, metricsFor } from './spec.js'
+import {
+  spec,
+  buildTree,
+  buildEdges,
+  buildTopologyEdges,
+  metricsFor,
+  collapseReplicaSets,
+  collapsedContainers,
+  redirectEdges,
+} from './spec.js'
 import { partitionMetricFamilies, pendingRequestCount, pendingRequestTotal, clearResultCache } from './metrics.js'
 import { liveRefreshEnabled, refreshTick } from './liveRefresh.js'
 import {
@@ -50,6 +59,41 @@ const layoutMode = computed(() => {
 const tree = computed(() => buildTree())
 const allVms = computed(() => tree.value.flatMap((server) => server.vms))
 const allContainers = computed(() => spec.containers)
+
+// "Collapse replica sets" — see stack.yaml's doc comment on `replicaSet`.
+// Only meaningful in the ungrouped views: "Group by server" always shows
+// every VM under its own real server, since replica-set members routinely
+// live on different ones and can't share one server's box anyway. Kept
+// separate from allVms/allContainers above (which stay the full,
+// uncollapsed lists) since those also back the one-time calibration pool,
+// which needs to measure every real VM/container regardless of this
+// toggle's state.
+const collapseReplicas = ref(false)
+const replicaCollapse = computed(() =>
+  collapseReplicas.value && layoutMode.value !== 'server' ? collapseReplicaSets(allVms.value) : null
+)
+const layoutVms = computed(() => (replicaCollapse.value ? replicaCollapse.value.vms : allVms.value))
+const layoutContainers = computed(() =>
+  replicaCollapse.value ? collapsedContainers(allContainers.value, replicaCollapse.value) : allContainers.value
+)
+// Combines both id -> representative-id maps into one, for redirecting any
+// edge regardless of which level (VM or container) its endpoints are at —
+// see layoutEdges below and renderedEdges further down, which both need
+// this same redirect.
+const replicaRedirect = computed(() =>
+  replicaCollapse.value
+    ? new Map([...replicaCollapse.value.vmRedirect, ...replicaCollapse.value.containerRedirect])
+    : null
+)
+// undefined (rather than the real edges) when collapsing is off, so
+// computeFlatMapLayout/computeContainerMapLayout fall through to their own
+// default (the real, uncollapsed topology) instead of redundantly
+// recomputing it here.
+const layoutEdges = computed(() => {
+  if (!replicaRedirect.value) return undefined
+  const rawEdges = layoutMode.value === 'container' ? buildEdges() : buildTopologyEdges()
+  return redirectEdges(rawEdges, replicaRedirect.value)
+})
 
 const isRefreshing = computed(() => pendingRequestCount.value > 0)
 
@@ -201,9 +245,9 @@ const externalShift = computed(() =>
 const layout = computed(() => {
   if (!initialSizesReady.value) return null
   if (layoutMode.value === 'container') {
-    return computeContainerMapLayout(allContainers.value, spec.externals, measuredContainerSizes.value)
+    return computeContainerMapLayout(layoutContainers.value, spec.externals, measuredContainerSizes.value, layoutEdges.value)
   }
-  if (layoutMode.value === 'flat') return computeFlatMapLayout(tree.value, spec.externals, measuredSizes.value)
+  if (layoutMode.value === 'flat') return computeFlatMapLayout(layoutVms.value, spec.externals, measuredSizes.value, layoutEdges.value)
 
   const granularity = groupByVm.value ? 'vm' : 'container'
   const sizes = groupByVm.value ? measuredSizes.value : measuredContainerSizes.value
@@ -227,7 +271,8 @@ const renderedEdges = computed(() => {
     }
   }
   const validEdges = []
-  for (const edge of buildEdges()) {
+  const rawEdges = replicaRedirect.value ? redirectEdges(buildEdges(), replicaRedirect.value) : buildEdges()
+  for (const edge of rawEdges) {
     const fromBox = boxes.get(edge.from)
     const toBox = boxes.get(edge.to)
     if (!fromBox || !toBox) {
@@ -329,7 +374,8 @@ watch(hoverDimEnabled, (enabled) => {
 const attachedContainerIds = computed(() => {
   if (!hoveredContainerId.value) return null
   const ids = new Set([hoveredContainerId.value])
-  for (const edge of buildEdges()) {
+  const rawEdges = replicaRedirect.value ? redirectEdges(buildEdges(), replicaRedirect.value) : buildEdges()
+  for (const edge of rawEdges) {
     if (edge.from === hoveredContainerId.value) ids.add(edge.to)
     if (edge.to === hoveredContainerId.value) ids.add(edge.from)
   }
@@ -405,6 +451,11 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
         v-model="groupByVm"
         label="Group by VM"
         title="Unchecking positions containers themselves via the same topological algorithm, instead of nesting them in their VM's box"
+      />
+      <UCheckbox
+        v-model="collapseReplicas"
+        label="Collapse replica sets"
+        title="Merges VMs sharing a replicaSet (see stack.yaml) into one box showing one member's real numbers — has no effect in 'Group by server', where members routinely live on different physical servers anyway"
       />
 
       <div class="map-hud__divider" />

@@ -580,13 +580,16 @@ function computeTopologicalLayout(nodes, edges) {
 // Same VMs and containers, but without server grouping, plus `externals`
 // (e.g. "live traffic") — used to pull a VM into the graph (e.g. out of
 // "no direct relationships") without acting as a real dependency hop.
-export function computeFlatMapLayout(tree, externals = [], measuredSizes) {
-  const vms = tree.flatMap((server) => server.vms)
+// `vms` is already flat (not a server tree) so the caller can hand this a
+// "Collapse replica sets"-collapsed list instead — see spec.js's
+// collapseReplicaSets. `edges` defaults to the real, uncollapsed topology
+// for callers that don't need that.
+export function computeFlatMapLayout(vms, externals = [], measuredSizes, edges = buildTopologyEdges()) {
   const nodes = [
     ...vms.map((vm) => layoutVm(vm, measuredSizes.get(vm.id))),
     ...externals.map(layoutExternalNode),
   ]
-  return computeTopologicalLayout(nodes, buildTopologyEdges())
+  return computeTopologicalLayout(nodes, edges)
 }
 
 // Backs the "Group by VM" toggle unchecked: the exact same topological
@@ -595,13 +598,14 @@ export function computeFlatMapLayout(tree, externals = [], measuredSizes) {
 // entirely, and every container (pgbouncer, memcached, nginx, ...) becomes
 // its own node wired up by its *own* relationships. Simpler than the VM
 // case in one way: containers are already the graph's real unit, so this
-// uses buildEdges() directly with no VM-projection step.
-export function computeContainerMapLayout(containers, externals = [], measuredSizes) {
+// uses buildEdges() directly (still overridable, same as above) with no
+// VM-projection step.
+export function computeContainerMapLayout(containers, externals = [], measuredSizes, edges = buildEdges()) {
   const nodes = [
     ...containers.map((c) => layoutContainerNode(c, measuredSizes.get(c.id))),
     ...externals.map(layoutExternalNode),
   ]
-  return computeTopologicalLayout(nodes, buildEdges())
+  return computeTopologicalLayout(nodes, edges)
 }
 
 // Absolute (world-coordinate) box for every server and unit (VM or

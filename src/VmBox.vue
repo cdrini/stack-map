@@ -184,11 +184,23 @@ defineExpose({ measure })
   <div
     ref="rootEl"
     class="map-vm"
-    :class="{ 'map-vm--critical': hasCriticalMetric, 'map-vm--dimmed': allContainersDimmed }"
+    :class="{
+      'map-vm--critical': hasCriticalMetric,
+      'map-vm--dimmed': allContainersDimmed,
+      'map-vm--replica-set': vm.replicaSetSize >= 2,
+      'map-vm--replica-set-3': vm.replicaSetSize >= 3,
+    }"
     :style="{ left: x + 'px', top: y + 'px' }"
   >
     <div class="map-vm__header">
-      <span class="map-vm__name">{{ vm.id }}</span>
+      <span class="map-vm__name">{{ vm.replicaSetName ?? vm.id }}</span>
+      <span
+        v-if="vm.replicaSetSize"
+        class="map-vm__replicas"
+        :title="`${vm.replicaSetSize} VMs collapsed into ${vm.id}'s own numbers — see the 'Collapse replica sets' toggle`"
+      >
+        x{{ vm.replicaSetSize }}
+      </span>
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
 
@@ -317,10 +329,40 @@ defineExpose({ measure })
   opacity: 0.3;
 }
 
+/* A collapsed replica set (see stack.yaml's `replicaSet`) reads as a
+   deck-of-cards stack rather than a single flat box — one or two more
+   copies of the same border/fill peeking out diagonally from behind,
+   further out the further back. The second only shows once there are
+   actually 3+ real members (--replica-set-3), so a 2-member set doesn't
+   visually claim a 3rd. Pure decoration: absolutely positioned relative
+   to .map-vm itself (already `position: absolute`, so no extra
+   positioning context needed) and at a negative z-index, so it never
+   affects this box's own measured size or sits above its real content. */
+.map-vm--replica-set::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: inherit;
+  transform: translate(5px, 5px);
+}
+
+.map-vm--replica-set-3::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: inherit;
+  transform: translate(3px, 3px);
+}
+
 .map-vm__header {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 0.4rem;
   margin-bottom: 3px;
 }
@@ -334,7 +376,18 @@ defineExpose({ measure })
   text-overflow: ellipsis;
 }
 
+.map-vm__replicas {
+  flex: none;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #64748b;
+  background: #e2e8f0;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
 .map-vm__role {
+  margin-left: auto;
   font-size: 0.6rem;
   color: #94a3b8;
   white-space: nowrap;
