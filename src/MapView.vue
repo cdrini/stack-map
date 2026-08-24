@@ -38,6 +38,13 @@ import MemBadge from './MemBadge.vue'
 // just local state like everything else here.
 const hoverDimEnabled = ref(true)
 
+// "queries" edges (every container hitting a database/cache/backend) are
+// the vast majority of edges on this map and mostly just add visual
+// noise — hidden by default, but still fed into the topological layout
+// (see renderedEdges/layoutEdges) so turning them on/off doesn't reshuffle
+// the map, only what's drawn on top of it.
+const showRequests = ref(false)
+
 const groupByServer = ref(false)
 // Which algorithm "Group by server" uses to arrange servers among
 // themselves and units within each one — see mapLayout.js's computeMapLayout.
@@ -262,6 +269,18 @@ const layout = computed(() => {
   }
 })
 
+// Raw entity-level edges (see buildEdges()), redirected through any active
+// replica-set collapse and filtered down to whatever "Show requests"
+// currently allows — the one shared source both renderedEdges (what's
+// drawn) and attachedContainerIds (hover-dim) scan, so hovering only ever
+// highlights neighbors actually visible on the map. Doesn't feed the
+// topological layout at all (see layoutEdges) — hiding "queries" edges is
+// purely a display/hover decision, not a reshuffle of the map.
+const visibleEdges = computed(() => {
+  const all = replicaRedirect.value ? redirectEdges(buildEdges(), replicaRedirect.value) : buildEdges()
+  return showRequests.value ? all : all.filter((e) => e.label !== 'queries')
+})
+
 const renderedEdges = computed(() => {
   if (!layout.value) return []
   const boxes = layoutMode.value === 'server' ? flattenLayout(layout.value) : flattenFlatLayout(layout.value)
@@ -271,8 +290,7 @@ const renderedEdges = computed(() => {
     }
   }
   const validEdges = []
-  const rawEdges = replicaRedirect.value ? redirectEdges(buildEdges(), replicaRedirect.value) : buildEdges()
-  for (const edge of rawEdges) {
+  for (const edge of visibleEdges.value) {
     const fromBox = boxes.get(edge.from)
     const toBox = boxes.get(edge.to)
     if (!fromBox || !toBox) {
@@ -374,12 +392,14 @@ watch(hoverDimEnabled, (enabled) => {
 const attachedContainerIds = computed(() => {
   if (!hoveredContainerId.value) return null
   const ids = new Set([hoveredContainerId.value])
-  const rawEdges = replicaRedirect.value ? redirectEdges(buildEdges(), replicaRedirect.value) : buildEdges()
-  for (const edge of rawEdges) {
+  for (const edge of visibleEdges.value) {
     if (edge.from === hoveredContainerId.value) ids.add(edge.to)
     if (edge.to === hoveredContainerId.value) ids.add(edge.from)
   }
-  return ids
+  // A node with no visible neighbors would otherwise dim literally
+  // everything else on the map just to highlight itself alone — not
+  // useful, so this is treated the same as nothing being hovered at all.
+  return ids.size > 1 ? ids : null
 })
 
 const viewportEl = ref(null)
@@ -483,6 +503,11 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
 
       <div class="map-hud__divider" />
 
+      <UCheckbox
+        v-model="showRequests"
+        label="Show requests"
+        title="'queries' edges — hidden by default since there are a lot of them; still factor into the layout either way"
+      />
       <UCheckbox v-model="hoverDimEnabled" label="Dim unrelated on hover" />
     </div>
     </div>
@@ -672,7 +697,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
             class="map-edge"
             :class="{
               'map-edge--dimmed':
-                hoveredContainerId && edge.from !== hoveredContainerId && edge.to !== hoveredContainerId,
+                attachedContainerIds && edge.from !== hoveredContainerId && edge.to !== hoveredContainerId,
             }"
           >
             <path
