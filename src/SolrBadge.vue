@@ -9,9 +9,9 @@
 // there's actually something to flag (only /select tracks these at all,
 // and even there a healthy endpoint sits at essentially zero).
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { fetchSolrMetrics, resolveMetricQuery } from './metrics.js'
-import { refreshTick } from './liveRefresh.js'
+import { useMetric } from './useMetric.js'
 
 const props = defineProps({
   metrics: { type: Array, required: true },
@@ -23,13 +23,18 @@ const emit = defineEmits(['settled', 'empty-change'])
 
 const requestRateMetric = computed(() => props.metrics.find((m) => m.type === 'solr-request-rate'))
 
-const status = ref('loading') // 'loading' | 'ok' | 'error'
-const requestsPerSecond = ref(null)
-const errorPercent = ref(null)
-const errorElevated = ref(false)
-const timeoutPercent = ref(null)
-const timeoutElevated = ref(false)
-const errorMessage = ref('')
+// See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
+// lifecycle; this badge just derives its own fields from whatever it last
+// fetched.
+const { status, data, errorMessage } = useMetric(
+  () => fetchSolrMetrics(props.metrics, props.resourceId),
+  () => emit('settled')
+)
+const requestsPerSecond = computed(() => data.value?.requestsPerSecond ?? null)
+const errorPercent = computed(() => data.value?.errorPercent ?? null)
+const errorElevated = computed(() => data.value?.errorElevated ?? false)
+const timeoutPercent = computed(() => data.value?.timeoutPercent ?? null)
+const timeoutElevated = computed(() => data.value?.timeoutElevated ?? false)
 
 // Compact thousands (7.7K rather than 7700) — the /min figure runs into
 // 4-5 digits often enough on /select that spelling it out was pushing the
@@ -60,34 +65,6 @@ const isEmpty = computed(
     Math.round(requestsPerSecond.value * 60) === 0
 )
 watch(isEmpty, (val) => emit('empty-change', val), { immediate: true })
-
-// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
-// settle, so the parent VmBox can correct a pre-data measurement.
-let hasSettledOnce = false
-
-async function load() {
-  try {
-    const data = await fetchSolrMetrics(props.metrics, props.resourceId)
-    requestsPerSecond.value = data.requestsPerSecond
-    errorPercent.value = data.errorPercent
-    errorElevated.value = data.errorElevated
-    timeoutPercent.value = data.timeoutPercent
-    timeoutElevated.value = data.timeoutElevated
-    status.value = 'ok'
-  } catch (e) {
-    // Keep the last good value on screen rather than blanking it — a
-    // failed refresh doesn't mean the previous reading is now wrong.
-    errorMessage.value = e instanceof Error ? e.message : String(e)
-    status.value = 'error'
-  }
-  if (!hasSettledOnce) {
-    hasSettledOnce = true
-    emit('settled')
-  }
-}
-
-onMounted(load)
-watch(refreshTick, load)
 </script>
 
 <template>

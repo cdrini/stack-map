@@ -32,6 +32,7 @@ import ContainerNode from './ContainerNode.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
 import MemBadge from './MemBadge.vue'
+import RewindTimeline from './RewindTimeline.vue'
 
 // Was a prop from App.vue back when the toggle lived in a separate page
 // header — now that all controls float directly on the map itself, it's
@@ -412,6 +413,8 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
 
 <template>
   <div class="map-view">
+    <RewindTimeline />
+
     <!-- Data freshness: is it live, and how live. -->
     <div class="map-hud map-hud--top-right">
       <UCheckbox v-model="liveRefreshEnabled" label="Live refresh (30s)" />

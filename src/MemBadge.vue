@@ -7,9 +7,9 @@
 // it, but only when it's elevated enough to suggest actual memory
 // exhaustion rather than just "somewhat full."
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { ramBusyColor, isRamBusyCritical, fetchRamMetrics, formatGiB } from './metrics.js'
-import { refreshTick } from './liveRefresh.js'
+import { useMetric } from './useMetric.js'
 import { openRamExplainer } from './ramExplainer.js'
 
 const props = defineProps({
@@ -19,47 +19,23 @@ const props = defineProps({
 
 const emit = defineEmits(['settled', 'critical-change'])
 
-const status = ref('loading') // 'loading' | 'ok' | 'error'
-const busy = ref(null)
-const usedBytes = ref(null)
-const cachedBytes = ref(null)
-const totalBytes = ref(null)
-const swapPercent = ref(null)
-const swapElevated = ref(false)
-const errorMessage = ref('')
+// See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
+// lifecycle; this badge just derives its own fields from whatever it last
+// fetched.
+const { status, data, errorMessage } = useMetric(
+  () => fetchRamMetrics(props.metrics, props.resourceId),
+  () => emit('settled')
+)
+const busy = computed(() => data.value?.busy ?? null)
+const usedBytes = computed(() => data.value?.usedBytes ?? null)
+const cachedBytes = computed(() => data.value?.cachedBytes ?? null)
+const totalBytes = computed(() => data.value?.totalBytes ?? null)
+const swapPercent = computed(() => data.value?.swapPercent ?? null)
+const swapElevated = computed(() => data.value?.swapElevated ?? false)
 
 const color = computed(() => (busy.value !== null ? ramBusyColor(busy.value) : null))
 const critical = computed(() => busy.value !== null && isRamBusyCritical(busy.value))
 watch(critical, (val) => emit('critical-change', val), { immediate: true })
-
-// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
-// settle, so the parent VmBox can correct a pre-data measurement.
-let hasSettledOnce = false
-
-async function load() {
-  try {
-    const data = await fetchRamMetrics(props.metrics, props.resourceId)
-    busy.value = data.busy
-    usedBytes.value = data.usedBytes
-    cachedBytes.value = data.cachedBytes
-    totalBytes.value = data.totalBytes
-    swapPercent.value = data.swapPercent
-    swapElevated.value = data.swapElevated
-    status.value = 'ok'
-  } catch (e) {
-    // Keep the last good value on screen rather than blanking it — a
-    // failed refresh doesn't mean the previous reading is now wrong.
-    errorMessage.value = e instanceof Error ? e.message : String(e)
-    status.value = 'error'
-  }
-  if (!hasSettledOnce) {
-    hasSettledOnce = true
-    emit('settled')
-  }
-}
-
-onMounted(load)
-watch(refreshTick, load)
 </script>
 
 <template>

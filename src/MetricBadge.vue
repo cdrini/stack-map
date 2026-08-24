@@ -5,9 +5,9 @@
 // (see metrics.js's partitionCpuMetrics) before this component ever sees
 // them, so it doesn't need to know that family exists.
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { fetchLatestMetric, resolveMetricQuery, customMetricColor } from './metrics.js'
-import { refreshTick } from './liveRefresh.js'
+import { useMetric } from './useMetric.js'
 
 const props = defineProps({
   metric: { type: Object, required: true },
@@ -16,9 +16,16 @@ const props = defineProps({
 
 const emit = defineEmits(['settled'])
 
-const status = ref('loading') // 'loading' | 'ok' | 'error'
-const value = ref(null)
-const errorMessage = ref('')
+// See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
+// lifecycle; this badge just derives its own fields from whatever it last
+// fetched. `data` here is the raw backend result itself ({value,
+// timestamp, window}), not a composite object like the other badges'
+// fetchXMetrics — there's nothing to derive beyond unwrapping `.value`.
+const { status, data, errorMessage } = useMetric(
+  () => fetchLatestMetric(props.metric, props.resourceId),
+  () => emit('settled')
+)
+const value = computed(() => data.value?.value ?? null)
 
 // `type: custom` carries its own display name/unit/thresholds in
 // stack.yaml, rather than this component hardcoding a per-type table the
@@ -30,28 +37,6 @@ const unit = computed(() => (isCustom.value ? (props.metric.unit ?? '') : ''))
 const color = computed(() =>
   isCustom.value && value.value !== null ? customMetricColor(value.value, props.metric.thresholds) : null
 )
-
-// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
-// settle, so the parent VmBox can correct a pre-data measurement.
-let hasSettledOnce = false
-
-async function load() {
-  try {
-    const data = await fetchLatestMetric(props.metric, props.resourceId)
-    value.value = data.value
-    status.value = 'ok'
-  } catch (e) {
-    errorMessage.value = e instanceof Error ? e.message : String(e)
-    status.value = 'error'
-  }
-  if (!hasSettledOnce) {
-    hasSettledOnce = true
-    emit('settled')
-  }
-}
-
-onMounted(load)
-watch(refreshTick, load)
 </script>
 
 <template>

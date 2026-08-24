@@ -17,6 +17,7 @@ VMs, metric types, or the templating at all.
 """
 
 import asyncio
+import time
 from pathlib import Path
 
 import httpx
@@ -60,6 +61,19 @@ PROMETHEUS_SOURCES = {env.STACKMAP_PROMETHEUS_SOURCE}
 # else.
 PROMETHEUS_URL_OVERRIDE = env.STACKMAP_PROMETHEUS_URL_OVERRIDE
 
+# How far back both endpoints below fetch — the map's "rewind" timeline
+# (src/RewindTimeline.vue) looks back through this window locally instead
+# of firing a fresh request per rewind point (see metrics.js's
+# fetchLatestMetric/pickAtTime), so this also caps how far back rewinding
+# actually reaches before falling back to the oldest point available.
+WINDOW_SECONDS = 600
+# Prometheus has no "give me whatever resolution you've got" mode like
+# Graphite's /render does — `step` has to be picked explicitly. 15s matches
+# the scrape interval this deployment's Prometheus instances actually use;
+# revisit if that ever changes (a `step` finer than the real scrape
+# interval just wastes a query returning repeated values).
+PROMETHEUS_STEP_SECONDS = 15
+
 # Routes live on a router rather than `app` directly so STACKMAP_BASE_PATH
 # (e.g. "/stack-map", for an nginx location block that forwards the full
 # path through unchanged rather than stripping its prefix) can prefix all
@@ -79,22 +93,26 @@ async def spec():
 
 @router.get("/api/metrics/latest")
 async def metrics_latest(source: str, query: list[str] = Query(...)):
-    """Latest datapoint for one or more metrics in a single Graphite round
-    trip (Graphite's /render accepts repeated `target` params natively) —
-    e.g. GET /api/metrics/latest?source=http://graphite.../render&query=a&query=b.
+    """Latest datapoint (plus a trailing window — see WINDOW_SECONDS) for
+    one or more metrics in a single Graphite round trip (Graphite's
+    /render accepts repeated `target` params natively) — e.g. GET
+    /api/metrics/latest?source=http://graphite.../render&query=a&query=b.
 
-    Always returns an object keyed by query, `{query: {value, timestamp}}`,
-    even for a single query — the frontend's batching layer (metrics.js)
-    is the only caller and always wants that shape. A query with no data
-    (metric doesn't exist, or genuinely has none) maps to `null` rather
-    than failing the whole request — Graphite itself does this: an
-    unresolvable target is just silently absent from its response, not an
-    error, so partial results are the normal case here, not a fallback.
+    Always returns an object keyed by query, `{query: {value, timestamp,
+    window}}`, even for a single query — the frontend's batching layer
+    (metrics.js) is the only caller and always wants that shape. `value`/
+    `timestamp` are the window's own latest point, kept as top-level
+    fields so today's callers (which only want "the current value") don't
+    need to reach into `window` at all. A query with no data (metric
+    doesn't exist, or genuinely has none) maps to `null` rather than
+    failing the whole request — Graphite itself does this: an unresolvable
+    target is just silently absent from its response, not an error, so
+    partial results are the normal case here, not a fallback.
     """
     if source not in ALLOWED_SOURCES:
         raise HTTPException(status_code=400, detail=f"source not allowed: {source}")
 
-    params = [("target", q) for q in query] + [("from", "-5min"), ("format", "json")]
+    params = [("target", q) for q in query] + [("from", f"-{WINDOW_SECONDS}s"), ("format", "json")]
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             response = await client.get(source, params=params)
@@ -108,15 +126,25 @@ async def metrics_latest(source: str, query: list[str] = Query(...)):
     for q in query:
         series = by_target.get(q)
         datapoints = series["datapoints"] if series else []
-        latest = next((dp for dp in reversed(datapoints) if dp[0] is not None), None)
-        result[q] = {"value": latest[0], "timestamp": latest[1]} if latest else None
+        window = [{"value": value, "timestamp": timestamp} for value, timestamp in datapoints if value is not None]
+        latest = window[-1] if window else None
+        result[q] = {"value": latest["value"], "timestamp": latest["timestamp"], "window": window} if latest else None
 
     return result
 
 
 async def _fetch_prometheus_one(client: httpx.AsyncClient, base: str, query: str):
+    now = time.time()
     try:
-        response = await client.get(f"{base}/api/v1/query", params={"query": query})
+        response = await client.get(
+            f"{base}/api/v1/query_range",
+            params={
+                "query": query,
+                "start": now - WINDOW_SECONDS,
+                "end": now,
+                "step": f"{PROMETHEUS_STEP_SECONDS}s",
+            },
+        )
         response.raise_for_status()
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"metrics source request failed: {e}")
@@ -124,17 +152,21 @@ async def _fetch_prometheus_one(client: httpx.AsyncClient, base: str, query: str
     series = response.json()["data"]["result"]
     if not series:
         return query, None
-    timestamp, value = series[0]["value"]
-    return query, {"value": float(value), "timestamp": timestamp}
+    window = [{"value": float(value), "timestamp": timestamp} for timestamp, value in series[0]["values"]]
+    latest = window[-1] if window else None
+    if not latest:
+        return query, None
+    return query, {"value": latest["value"], "timestamp": latest["timestamp"], "window": window}
 
 
 @router.get("/api/metrics/prometheus/latest")
 async def prometheus_metrics_latest(source: str, query: list[str] = Query(...)):
-    """Same contract as /api/metrics/latest, but for Prometheus's instant
-    query API — one request per query (Prometheus has no equivalent of
-    Graphite's repeated-target batching), fired concurrently so an N-query
-    batch still costs one round trip's worth of wall-clock time rather than
-    N sequential ones.
+    """Same contract as /api/metrics/latest (including the `window` field —
+    see WINDOW_SECONDS), but for Prometheus — one request per query, fired
+    concurrently so an N-query batch still costs one round trip's worth of
+    wall-clock time rather than N sequential ones. Uses the range-query API
+    rather than an instant query, which by construction can't return a
+    window at all.
     """
     if source not in PROMETHEUS_SOURCES:
         raise HTTPException(status_code=400, detail=f"source not allowed: {source}")

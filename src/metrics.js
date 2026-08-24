@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { basePrefix } from './apiBase.js'
 import { REFRESH_INTERVAL_MS } from './liveRefresh.js'
+import { effectiveRewindTime } from './rewind.js'
 
 // How many metric fetches are outstanding right now, and how many the
 // current batch started with — a cache hit never touches either (nothing's
@@ -155,6 +156,14 @@ async function fetchChunk(source, items) {
   }
 }
 
+// A second caller asking for the exact same (source, query) while a fetch
+// for it is already queued/in flight — e.g. the calibration pool's hidden
+// pre-render of every VM/container box, mounted alongside the real one,
+// whose badges ask for identical data at nearly the same moment — reuses
+// that same pending promise instead of queuing a duplicate request, so
+// every query only ever actually goes out once per refresh.
+const inFlight = new Map() // cacheKey -> Promise
+
 function fetchOne(source, query, resourceId, isPrometheus) {
   const key = cacheKey(source, query)
   const cached = resultCache.get(key)
@@ -162,8 +171,11 @@ function fetchOne(source, query, resourceId, isPrometheus) {
     return cached.error ? Promise.reject(cached.error) : Promise.resolve(cached.result)
   }
 
+  const pending = inFlight.get(key)
+  if (pending) return pending
+
   trackPending()
-  return new Promise((resolve, reject) => {
+  const promise = new Promise((resolve, reject) => {
     if (!pendingBySource.has(source)) pendingBySource.set(source, [])
     pendingBySource.get(source).push({
       query,
@@ -171,21 +183,50 @@ function fetchOne(source, query, resourceId, isPrometheus) {
       isPrometheus,
       resolve: (result) => {
         resultCache.set(key, { result, fetchedAt: Date.now() })
+        inFlight.delete(key)
         untrackPending()
         resolve(result)
       },
       reject: (err) => {
         resultCache.set(key, { error: err, fetchedAt: Date.now() })
+        inFlight.delete(key)
         untrackPending()
         reject(err)
       },
     })
     scheduleFlush()
   })
+  inFlight.set(key, promise)
+  return promise
 }
 
+// The point in `window` closest to `targetSeconds` (Graphite/Prometheus
+// timestamps are Unix seconds) — used to answer "what was this metric at
+// this past moment" from data already fetched for the live view, rather
+// than firing a new request per rewind point. Assumes `window` is sorted
+// oldest-to-newest (true of everything the backend returns today) but
+// doesn't rely on it being contiguous — a plain linear scan for closest,
+// not a binary search, since these windows are only tens of points long.
+function pickAtTime(window, targetSeconds) {
+  if (!window || window.length === 0) return null
+  return window.reduce((closest, point) =>
+    Math.abs(point.timestamp - targetSeconds) < Math.abs(closest.timestamp - targetSeconds) ? point : closest
+  )
+}
+
+// Every composite family (fetchCpuMetrics, fetchRamMetrics, ...) calls
+// this per raw metric and only ever reads the returned `value`/
+// `timestamp` — applying rewind here, rather than in each of them, is
+// what makes "rewind to an earlier time" apply everywhere for free. Falls
+// back to the live latest point if the rewind target is outside what's
+// been fetched (see rewind.js) rather than erroring — a stale rewind
+// point that's since scrolled out of the trailing window degrades to
+// "closest available", not a broken badge.
 export async function fetchLatestMetric(metric, resourceId) {
-  return fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId, isPrometheusBacked(metric.type))
+  const result = await fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId, isPrometheusBacked(metric.type))
+  if (!effectiveRewindTime.value) return result
+  const picked = pickAtTime(result.window, effectiveRewindTime.value.getTime() / 1000)
+  return picked ? { ...result, value: picked.value, timestamp: picked.timestamp } : result
 }
 
 // `cpu-*`, `mem-*`/`swap-*`, and `disk-*` each render as one composite

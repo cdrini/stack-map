@@ -8,9 +8,9 @@
 // when there's actually something to flag (a healthy backend queues
 // nothing and has every server in rotation).
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { haproxySessionsColor, isHaproxySessionsCritical, fetchHaproxyMetrics, resolveMetricQuery } from './metrics.js'
-import { refreshTick } from './liveRefresh.js'
+import { useMetric } from './useMetric.js'
 
 const props = defineProps({
   metrics: { type: Array, required: true },
@@ -22,15 +22,20 @@ const emit = defineEmits(['settled', 'critical-change'])
 
 const sessionsMetric = computed(() => props.metrics.find((m) => m.type === 'haproxy-sessions'))
 
-const status = ref('loading') // 'loading' | 'ok' | 'error'
-const busy = ref(null)
-const sessions = ref(null)
-const queue = ref(null)
-const queueElevated = ref(false)
-const up = ref(null)
-const total = ref(null)
-const healthDegraded = ref(false)
-const errorMessage = ref('')
+// See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
+// lifecycle; this badge just derives its own fields from whatever it last
+// fetched.
+const { status, data, errorMessage } = useMetric(
+  () => fetchHaproxyMetrics(props.metrics, props.resourceId),
+  () => emit('settled')
+)
+const busy = computed(() => data.value?.busy ?? null)
+const sessions = computed(() => data.value?.sessions ?? null)
+const queue = computed(() => data.value?.queue ?? null)
+const queueElevated = computed(() => data.value?.queueElevated ?? false)
+const up = computed(() => data.value?.up ?? null)
+const total = computed(() => data.value?.total ?? null)
+const healthDegraded = computed(() => data.value?.healthDegraded ?? false)
 
 const color = computed(() => (busy.value !== null ? haproxySessionsColor(busy.value) : null))
 // A backend server being pulled from rotation renders in the same red as
@@ -38,36 +43,6 @@ const color = computed(() => (busy.value !== null ? haproxySessionsColor(busy.va
 // as critical too — a downed server is at least as urgent as high load.
 const critical = computed(() => (busy.value !== null && isHaproxySessionsCritical(busy.value)) || healthDegraded.value)
 watch(critical, (val) => emit('critical-change', val), { immediate: true })
-
-// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
-// settle, so the parent VmBox can correct a pre-data measurement.
-let hasSettledOnce = false
-
-async function load() {
-  try {
-    const data = await fetchHaproxyMetrics(props.metrics, props.resourceId)
-    busy.value = data.busy
-    sessions.value = data.sessions
-    queue.value = data.queue
-    queueElevated.value = data.queueElevated
-    up.value = data.up
-    total.value = data.total
-    healthDegraded.value = data.healthDegraded
-    status.value = 'ok'
-  } catch (e) {
-    // Keep the last good value on screen rather than blanking it — a
-    // failed refresh doesn't mean the previous reading is now wrong.
-    errorMessage.value = e instanceof Error ? e.message : String(e)
-    status.value = 'error'
-  }
-  if (!hasSettledOnce) {
-    hasSettledOnce = true
-    emit('settled')
-  }
-}
-
-onMounted(load)
-watch(refreshTick, load)
 </script>
 
 <template>

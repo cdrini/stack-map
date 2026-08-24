@@ -8,9 +8,9 @@
 // only when requests are actually backing up rather than a normal
 // occasional blip.
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { diskBusyColor, isDiskBusyCritical, fetchDiskMetrics, resolveMetricQuery } from './metrics.js'
-import { refreshTick } from './liveRefresh.js'
+import { useMetric } from './useMetric.js'
 import { openDiskExplainer } from './diskExplainer.js'
 
 const props = defineProps({
@@ -28,41 +28,20 @@ const emit = defineEmits(['settled', 'critical-change'])
 const busyMetric = computed(() => props.metrics.find((m) => m.type === 'disk-busy'))
 const label = computed(() => (props.multiDisk ? `DISK ${props.disk}:` : 'DISK:'))
 
-const status = ref('loading') // 'loading' | 'ok' | 'error'
-const busy = ref(null)
-const pending = ref(null)
-const pendingElevated = ref(false)
-const errorMessage = ref('')
+// See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
+// lifecycle; this badge just derives its own fields from whatever it last
+// fetched.
+const { status, data, errorMessage } = useMetric(
+  () => fetchDiskMetrics(props.metrics, props.resourceId),
+  () => emit('settled')
+)
+const busy = computed(() => data.value?.busy ?? null)
+const pending = computed(() => data.value?.pending ?? null)
+const pendingElevated = computed(() => data.value?.pendingElevated ?? false)
 
 const color = computed(() => (busy.value !== null ? diskBusyColor(busy.value) : null))
 const critical = computed(() => busy.value !== null && isDiskBusyCritical(busy.value))
 watch(critical, (val) => emit('critical-change', val), { immediate: true })
-
-// See CpuBadge.vue's `hasSettledOnce` — fires once, on this badge's first
-// settle, so the parent VmBox can correct a pre-data measurement.
-let hasSettledOnce = false
-
-async function load() {
-  try {
-    const data = await fetchDiskMetrics(props.metrics, props.resourceId)
-    busy.value = data.busy
-    pending.value = data.pending
-    pendingElevated.value = data.pendingElevated
-    status.value = 'ok'
-  } catch (e) {
-    // Keep the last good value on screen rather than blanking it — a
-    // failed refresh doesn't mean the previous reading is now wrong.
-    errorMessage.value = e instanceof Error ? e.message : String(e)
-    status.value = 'error'
-  }
-  if (!hasSettledOnce) {
-    hasSettledOnce = true
-    emit('settled')
-  }
-}
-
-onMounted(load)
-watch(refreshTick, load)
 </script>
 
 <template>
