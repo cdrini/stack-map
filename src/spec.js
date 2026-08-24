@@ -113,13 +113,18 @@ export function metricsFor(entity, entityType) {
 
 // Same idea as metricsFor, for an entity's `links: [{ label, url }]` (see
 // stack.yaml's doc comment) — an entity's own links plus whatever
-// top-level `links:` entries match its type via `filter`. `{{id}}` in
-// `url` is left unresolved here (same as metricsFor's `query`) since
-// resolving it needs the entity's own id, supplied by the caller — see
-// resolveLinkUrl.
+// top-level `links:` entries match it via `filter` (`filter.type`, same as
+// metrics; `filter.image`, container-only, for e.g. distinguishing `web`
+// from `fast_web`). `{{id}}`/`{{hostedOn}}` in `url` are left unresolved
+// here (same as metricsFor's `query`) since resolving them needs the
+// entity's own id/hostedOn, supplied by the caller — see resolveLinkUrl.
 export function linksFor(entity, entityType) {
   const ownLinks = entity.links || []
-  const globalLinks = spec.links.filter((l) => !l.filter?.type || l.filter.type.includes(entityType))
+  const globalLinks = spec.links.filter(
+    (l) =>
+      (!l.filter?.type || l.filter.type.includes(entityType)) &&
+      (!l.filter?.image || l.filter.image === entity.image)
+  )
   return [...ownLinks, ...globalLinks]
 }
 
@@ -210,8 +215,13 @@ export function redirectEdges(edges, redirect) {
   return result
 }
 
-export function resolveLinkUrl(link, resourceId) {
-  return link.url.replaceAll('{{id}}', resourceId)
+// `hostedOn` is optional — only containers currently have a link needing
+// it (e.g. a per-VM-hostname Sentry search), so callers without one (VMs
+// resolving their own links) just omit it.
+export function resolveLinkUrl(link, resourceId, hostedOn) {
+  let url = link.url.replaceAll('{{id}}', resourceId)
+  if (hostedOn) url = url.replaceAll('{{hostedOn}}', hostedOn)
+  return url
 }
 
 export function buildTree() {
