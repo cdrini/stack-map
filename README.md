@@ -39,14 +39,43 @@ servers) can be added later without restructuring.
 The container list was hand-transcribed from openlibrary's
 `compose.production.yaml` `profiles:` field (which pins each service to the
 VM(s) it deploys to) — it will drift as that file changes, so re-check it
-against compose.production.yaml periodically rather than trusting it's
-current.
+against the compose files periodically rather than trusting it's current.
+`server/compose_refs.py` covers most of that (see below): it can't invent an
+entity for a service that's newly appeared, but it reports the ones nothing
+in the spec points at, and keeps every `definition:` anchor correct itself.
 
 Any entity can carry its own `metrics: [{ type, source, query }]`, and the
 top-level `metrics:` list applies a metric to every entity matching its
 `filter` (e.g. `filter: { type: [vm, server] }`) instead of repeating it
 per-entity — see the doc comments at the top of `src/stack.yaml` for the
 full shape, including how the `cpu-busy`/`cpu-wait`/`cpu-steal` family works.
+
+## Keeping `definition:` anchors current
+
+A container's `definition:` links to the exact lines defining its service in
+one of openlibrary's compose files
+(`.../blob/<sha>/compose.production.yaml#L9-L26`). Only `(compose file,
+service name)` is durable there — the line numbers are derived data that go
+stale the moment anyone inserts a line above the block, so
+`server/compose_refs.py` recomputes them at a given git sha rather than
+anyone maintaining them by hand. It resolves each container to its service
+from the container id (`<service>@<vm>`) and the file path already in the
+URL, neither of which rots:
+
+```sh
+cd server
+uv run python compose_refs.py check     # what's gone stale; exits non-zero if anything has
+uv run python compose_refs.py update    # rewrite the anchors in place
+uv run python compose_refs.py services  # every service, its line range and its profiles
+```
+
+`--ref` is the commit to compute against (default `master`), and `--repo
+<path>` reads from a local openlibrary clone instead of GitHub. Rewritten
+URLs are pinned to the resolved sha rather than a branch name, since a branch
+keeps moving and its line numbers are only right until the next compose edit
+— `--no-pin` keeps whatever ref is already there. `update` only ever
+rewrites `definition:` lines, and leaves ones it couldn't resolve alone, so a
+renamed or removed service gets reported instead of silently mangled.
 
 ## Dev
 
