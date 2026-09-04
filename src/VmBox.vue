@@ -8,8 +8,7 @@ import {
   groupHaproxyMetricsByBackend,
   groupSolrMetricsByHandler,
 } from './metrics.js'
-import { containerMenuItems } from './containerMenu.js'
-import { vmMenuItems } from './vmMenu.js'
+import { stackMenuItems } from './stackMenu.js'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
@@ -180,7 +179,7 @@ defineExpose({ measure })
 </script>
 
 <template>
-  <UContextMenu :items="vmMenuItems(vm)" size="sm">
+  <UContextMenu :items="stackMenuItems(vm, 'vm')" size="sm">
   <div
     ref="rootEl"
     class="map-vm"
@@ -206,22 +205,27 @@ defineExpose({ measure })
 
     <div v-if="hasMetrics" class="map-vm__metrics">
       <div v-if="cpuMetrics.length" class="map-vm__metrics-row">
+        <UContextMenu :items="stackMenuItems(vm, 'vm', 'cpu')" size="sm">
         <CpuBadge
           :metrics="cpuMetrics"
           :resource-id="vm.id"
           @settled="onBadgeSettled"
           @critical-change="(v) => setCritical('cpu', v)"
         />
+        </UContextMenu>
       </div>
       <div v-if="ramMetrics.length" class="map-vm__metrics-row">
+        <UContextMenu :items="stackMenuItems(vm, 'vm', 'ram')" size="sm">
         <MemBadge
           :metrics="ramMetrics"
           :resource-id="vm.id"
           @settled="onBadgeSettled"
           @critical-change="(v) => setCritical('ram', v)"
         />
+        </UContextMenu>
       </div>
       <div v-for="group in diskGroups" :key="'disk-' + group.disk" class="map-vm__metrics-row">
+        <UContextMenu :items="stackMenuItems(vm, 'vm', 'disk')" size="sm">
         <DiskBadge
           :metrics="group.metrics"
           :disk="group.disk"
@@ -230,6 +234,7 @@ defineExpose({ measure })
           @settled="onBadgeSettled"
           @critical-change="(v) => setCritical('disk:' + group.disk, v)"
         />
+        </UContextMenu>
       </div>
       <div v-for="metric in otherMetrics" :key="metric.type" class="map-vm__metrics-row">
         <MetricBadge :metric="metric" :resource-id="vm.id" @settled="onBadgeSettled" />
@@ -242,7 +247,7 @@ defineExpose({ measure })
       <UContextMenu
         v-for="c in vm.containers"
         :key="c.id"
-        :items="containerMenuItems(c)"
+        :items="stackMenuItems(c, 'container')"
         size="sm"
       >
       <div
