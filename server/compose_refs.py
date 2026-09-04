@@ -20,6 +20,11 @@ Compose files are read from a local openlibrary clone when `--repo` names one
 (no network, but only for shas it has fetched), otherwise from GitHub's raw
 endpoint (any sha, and no clone needed — which is what a deployment has).
 
+`main.py` uses `rewrite_definitions` to do this on the way out of
+`GET /api/spec`, so the served spec's anchors are current without the file on
+disk ever being written to; this CLI is for one-off runs and for actually
+updating the file.
+
 Usage, from this directory:
 
     uv run python compose_refs.py services --ref master
@@ -332,6 +337,27 @@ def read_definitions(
     return definitions
 
 
+def rewrite_definitions(
+    spec_text: str, compose: ComposeFiles, target_ref: str | None = None
+) -> tuple[str, list[Definition]]:
+    """The spec with every resolvable `definition:` anchor recomputed.
+
+    Only `definition:` lines are rewritten, so the comments carrying most of
+    the spec's documentation survive intact; anchors that resolve to no
+    service are left exactly as they were rather than guessed at.
+    """
+    definitions = read_definitions(spec_text, compose, target_ref)
+    lines = spec_text.splitlines(keepends=True)
+    for definition in definitions:
+        if definition.status in ("ok", "unresolved"):
+            continue
+        index = definition.line_no - 1
+        indent = DEFINITION_RE.match(lines[index]).group("indent")
+        ending = "\r\n" if lines[index].endswith("\r\n") else "\n"
+        lines[index] = f"{indent}definition: {definition.url}{ending}"
+    return "".join(lines), definitions
+
+
 def build_source(args: argparse.Namespace) -> LocalRepo | GitHubRepo:
     if args.repo:
         path = Path(args.repo).expanduser()
@@ -426,27 +452,19 @@ def cmd_update(args: argparse.Namespace) -> int:
     compose = ComposeFiles(source, sha)
     path = spec_path(args)
     text = path.read_text()
-    definitions = read_definitions(text, compose, sha if args.pin else None)
+    rewritten_text, definitions = rewrite_definitions(
+        text, compose, sha if args.pin else None
+    )
 
     print(f"{source} @ {sha} ({args.ref}, {source.describe(sha)})")
     print(f"spec: {path}\n")
     _report(definitions, compose)
 
-    lines = text.splitlines(keepends=True)
-    rewritten = 0
-    for definition in definitions:
-        if definition.status in ("ok", "unresolved"):
-            continue
-        index = definition.line_no - 1
-        indent = DEFINITION_RE.match(lines[index]).group("indent")
-        ending = "\r\n" if lines[index].endswith("\r\n") else "\n"
-        lines[index] = f"{indent}definition: {definition.url}{ending}"
-        rewritten += 1
-
+    rewritten = sum(1 for d in definitions if d.status not in ("ok", "unresolved"))
     if not rewritten:
         print("\nnothing to rewrite")
         return 0
-    path.write_text("".join(lines))
+    path.write_text(rewritten_text)
     print(f"\nrewrote {rewritten} definition line(s) in {path}")
     if any(d.status == "unresolved" for d in definitions):
         print("left unresolved anchors alone — check whether those services were renamed")

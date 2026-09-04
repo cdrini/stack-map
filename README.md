@@ -56,11 +56,19 @@ A container's `definition:` links to the exact lines defining its service in
 one of openlibrary's compose files
 (`.../blob/<sha>/compose.production.yaml#L9-L26`). Only `(compose file,
 service name)` is durable there — the line numbers are derived data that go
-stale the moment anyone inserts a line above the block, so
-`server/compose_refs.py` recomputes them at a given git sha rather than
-anyone maintaining them by hand. It resolves each container to its service
-from the container id (`<service>@<vm>`) and the file path already in the
-URL, neither of which rots:
+stale the moment anyone inserts a line above the block.
+
+So `GET /api/spec` recomputes them on the way out, resolving each container
+to its service from the container id (`<service>@<vm>`) and the file path
+already in the URL, neither of which rots. Nothing has to be maintained by
+hand, and the spec file — an input, mounted read-only — is never written to.
+The compose files are fetched from GitHub and cached for an hour
+(`ComposeCache` in `server/main.py`, warmed at startup so no request pays for
+it); if they can't be reached, the spec is served exactly as it sits on disk,
+since a link that's a few lines off beats an endpoint that fails.
+
+`server/compose_refs.py` holds that derivation, and doubles as a CLI for
+one-off runs and for rewriting the file on disk:
 
 ```sh
 cd server

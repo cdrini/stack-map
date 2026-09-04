@@ -17,7 +17,9 @@ VMs, metric types, or the templating at all.
 """
 
 import asyncio
+import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -26,11 +28,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+import compose_refs
 from env import get_env
 
 env = get_env()
+log = logging.getLogger(__name__)
 
-app = FastAPI(title="stack-map metrics API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warmed in the background rather than awaited, so a slow or unreachable
+    # GitHub delays neither startup nor the first request — /api/spec just
+    # serves the spec's own anchors until the fetch lands.
+    warm = asyncio.create_task(compose_cache.warm())
+    yield
+    warm.cancel()
+
+
+app = FastAPI(title="stack-map metrics API", lifespan=lifespan)
 
 # No CORS at all unless STACKMAP_CORS_ALLOWED_ORIGINS is set (see env.py) —
 # local dev sets it to "*" itself; production should set it to the deployed
@@ -61,6 +76,83 @@ PROMETHEUS_SOURCES = {env.STACKMAP_PROMETHEUS_SOURCE}
 # else.
 PROMETHEUS_URL_OVERRIDE = env.STACKMAP_PROMETHEUS_URL_OVERRIDE
 
+# stack.yaml's `definition:` URLs carry line numbers into openlibrary's
+# compose files, and those go stale on their own as the files are edited. They
+# get recomputed on the way out of /api/spec (see compose_refs.py, shared with
+# its CLI) rather than written back into the spec: the spec is an input,
+# mounted read-only, and derived data doesn't belong in it.
+COMPOSE_REF = "master"
+# Anchors only move when someone edits a compose file, so this can be slow.
+COMPOSE_TTL_SECONDS = 3600
+# Shorter, so a transient GitHub failure isn't served around for a full TTL —
+# but still long enough not to retry once per request while it's down.
+COMPOSE_RETRY_SECONDS = 300
+
+
+class ComposeCache:
+    """openlibrary's compose files, refetched at most once per TTL.
+
+    Both the sha lookup and the file reads are blocking (compose_refs is a
+    sync library, shared with its CLI), so they run in a thread rather than
+    on the event loop.
+    """
+
+    def __init__(self, ref: str = COMPOSE_REF):
+        self.ref = ref
+        self._source = compose_refs.GitHubRepo()
+        self._files: compose_refs.ComposeFiles | None = None
+        self._valid_until = 0.0
+        self._lock = asyncio.Lock()
+
+    def _load(self) -> compose_refs.ComposeFiles:
+        sha = self._source.resolve(self.ref)
+        # An unchanged sha keeps the already-parsed files; a new one starts
+        # over, since every anchor in them has potentially moved.
+        if self._files is not None and self._files.sha == sha:
+            return self._files
+        return compose_refs.ComposeFiles(self._source, sha)
+
+    async def get(self) -> compose_refs.ComposeFiles | None:
+        """The current compose files, or None if they've never been fetched."""
+        if time.monotonic() < self._valid_until:
+            return self._files
+        async with self._lock:
+            # Another request may have refreshed while this one waited.
+            if time.monotonic() < self._valid_until:
+                return self._files
+            try:
+                self._files = await asyncio.to_thread(self._load)
+                self._valid_until = time.monotonic() + COMPOSE_TTL_SECONDS
+            except Exception as e:
+                # Never fail /api/spec over this — the spec's own anchors are
+                # a usable answer, just possibly a stale one. A previous good
+                # fetch keeps being served until it's replaced.
+                self._valid_until = time.monotonic() + COMPOSE_RETRY_SECONDS
+                log.warning("compose refresh failed, serving spec anchors as-is: %s", e)
+        return self._files
+
+    async def warm(self) -> None:
+        """Resolve the sha and parse the files the spec points at, so the
+        first real request pays for neither. Which files those are is only
+        knowable from the spec, hence the throwaway rewrite.
+        """
+        compose = await self.get()
+        if compose is None:
+            return
+        try:
+            await asyncio.to_thread(
+                compose_refs.rewrite_definitions,
+                env.STACKMAP_SPEC_PATH.read_text(),
+                compose,
+                compose.sha,
+            )
+        except Exception as e:
+            log.warning("compose warm-up failed: %s", e)
+
+
+compose_cache = ComposeCache()
+
+
 # How far back both endpoints below fetch — the map's "rewind" timeline
 # (src/RewindTimeline.vue) looks back through this window locally instead
 # of firing a fresh request per rewind point (see metrics.js's
@@ -87,8 +179,26 @@ async def spec():
     already depends on js-yaml). Read fresh on every request rather than
     cached at startup, so editing STACKMAP_SPEC_PATH's file takes effect on
     the next browser refresh instead of a server restart.
+
+    Each container's `definition:` line anchor is recomputed against
+    openlibrary's compose files on the way out (see ComposeCache above), so
+    the links stay correct as those files are edited without anyone
+    maintaining the line numbers — or the file on disk, which is mounted
+    read-only, being written to. Served unchanged if the compose files
+    aren't reachable.
     """
-    return env.STACKMAP_SPEC_PATH.read_text()
+    text = env.STACKMAP_SPEC_PATH.read_text()
+    compose = await compose_cache.get()
+    if compose is None:
+        return text
+    try:
+        resolved, _ = await asyncio.to_thread(
+            compose_refs.rewrite_definitions, text, compose, compose.sha
+        )
+    except Exception as e:
+        log.warning("could not resolve definition anchors: %s", e)
+        return text
+    return resolved
 
 
 @router.get("/api/metrics/latest")

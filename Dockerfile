@@ -33,7 +33,7 @@ RUN uv sync --frozen
 FROM python:3.14-alpine AS runtime
 WORKDIR /app
 COPY --from=deps-builder /app/.venv ./.venv
-COPY server/env.py server/main.py ./
+COPY server/env.py server/main.py server/compose_refs.py ./
 COPY --from=frontend-builder /app/dist ./static
 
 ENV PATH="/app/.venv/bin:$PATH"
