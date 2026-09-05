@@ -50,6 +50,14 @@ top-level `metrics:` list applies a metric to every entity matching its
 per-entity — see the doc comments at the top of `src/stack.yaml` for the
 full shape, including how the `cpu-busy`/`cpu-wait`/`cpu-steal` family works.
 
+A container can also carry `config:` — a link to the config file that drives
+it, e.g. an haproxy's `haproxy.cfg` — shown as "View config" in its
+right-click menu. Unlike `definition:` it's a whole-file link with no line
+anchor, so it needs none of the recomputation below and can stay pointed at
+`master`. Most containers aren't driven by a config file worth reading, so
+it's simply left out of the menu when absent, rather than shown disabled the
+way a missing `definition:` is.
+
 ## Keeping `definition:` anchors current
 
 A container's `definition:` links to the exact lines defining its service in

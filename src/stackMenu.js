@@ -68,15 +68,27 @@ function containerSection(container) {
   // Unlike links, "View definition" shows up even when there's nothing to
   // open — a container with no `definition:` is worth surfacing as a gap
   // in the spec rather than silently offering one item fewer.
-  return section(`CONTAINER: ${container.image}`, [
+  const items = [
     {
       label: 'View definition',
       icon: 'i-lucide-file-code-2',
       disabled: !container.definition,
       onSelect: () => window.open(container.definition, '_blank', 'noopener'),
     },
-    ...linkItems(container, 'container'),
-  ])
+  ]
+
+  // `config:` is the opposite case: only some containers are driven by a
+  // config file worth reading (an haproxy's backends, an nginx's routing),
+  // so its absence says nothing and it's simply left out — no disabled row.
+  if (container.config) {
+    items.push({
+      label: 'View config',
+      icon: 'i-lucide-file-cog',
+      onSelect: () => window.open(container.config, '_blank', 'noopener'),
+    })
+  }
+
+  return section(`CONTAINER: ${container.image}`, [...items, ...linkItems(container, 'container')])
 }
 
 function vmSection(vm) {
