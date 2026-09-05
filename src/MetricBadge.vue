@@ -6,7 +6,7 @@
 // them, so it doesn't need to know that family exists.
 
 import { computed } from 'vue'
-import { fetchLatestMetric, resolveMetricQuery, customMetricColor } from './metrics.js'
+import { fetchLatestMetric, resolveMetricQuery, customMetricColor, formatDuration } from './metrics.js'
 import { useMetric } from './useMetric.js'
 
 const props = defineProps({
@@ -37,6 +37,15 @@ const unit = computed(() => (isCustom.value ? (props.metric.unit ?? '') : ''))
 const color = computed(() =>
   isCustom.value && value.value !== null ? customMetricColor(value.value, props.metric.thresholds) : null
 )
+
+// A metric measured in seconds is a duration, so it's shown as one rather
+// than as a raw count that has to be divided in your head — see
+// formatDuration. Every other unit is still just appended to the figure.
+const display = computed(() => {
+  if (value.value === null) return null
+  if (isCustom.value && props.metric.unit === 's') return formatDuration(value.value)
+  return `${value.value.toFixed(2)}${unit.value}`
+})
 </script>
 
 <template>
@@ -51,7 +60,7 @@ const color = computed(() =>
       :class="{ 'metric-badge__value--ok': !isCustom, 'metric-badge__value--plain': isCustom && color?.plain }"
       :style="color && !color.plain ? { color: color.color, background: color.background } : null"
     >
-      {{ label }} {{ value.toFixed(2) }}{{ unit }}
+      {{ label }} {{ display }}
     </span>
     <span v-else class="metric-badge__value metric-badge__value--error">api unreachable?</span>
   </div>

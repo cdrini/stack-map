@@ -647,6 +647,37 @@ export function isHaproxySessionsCritical(busyPercent) {
   return haproxySessionsColor(busyPercent) === HAPROXY_SESSIONS_TIERS.at(-1)
 }
 
+// The units a duration is broken into, largest first.
+const DURATION_UNITS = [
+  { suffix: 'd', seconds: 86400 },
+  { suffix: 'h', seconds: 3600 },
+  { suffix: 'm', seconds: 60 },
+  { suffix: 's', seconds: 1 },
+]
+
+// A number of seconds as the one or two largest units that actually carry
+// information — "45s", "1m 30s", "3h 5m", "2d 4h". A lag metric spans
+// seconds to days, and nobody reads "10800.00s" as three hours.
+//
+// The smaller unit is dropped when it rounds to zero ("1h", not "1h 0m"),
+// so a value is never padded with a component that says nothing. Below ten
+// seconds a single decimal is kept, since that's the range where a
+// fraction still changes what the number means.
+export function formatDuration(seconds) {
+  const sign = seconds < 0 ? '-' : ''
+  const total = Math.abs(seconds)
+  if (total < 10) return `${sign}${Number(total.toFixed(1))}s`
+
+  const index = DURATION_UNITS.findIndex((u) => total >= u.seconds)
+  const unit = DURATION_UNITS[index]
+  const next = DURATION_UNITS[index + 1]
+  const whole = Math.floor(total / unit.seconds)
+  const remainder = next ? Math.floor((total - whole * unit.seconds) / next.seconds) : 0
+  return remainder
+    ? `${sign}${whole}${unit.suffix} ${remainder}${next.suffix}`
+    : `${sign}${whole}${unit.suffix}`
+}
+
 // `type: custom` metrics (see stack.yaml's doc comment) carry their own
 // warn/danger thresholds instead of this file hardcoding a per-type tier
 // table the way every other family above does — this file has no way to
