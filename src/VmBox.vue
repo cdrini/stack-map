@@ -147,16 +147,18 @@ function setHandlerEmpty(key, isEmptyValue) {
   }
 }
 
-// Same concern as setHandlerEmpty above, for DiskBadge's call-out row (see
-// its `hasCallouts`): it appears and disappears with live readings, and a
-// disk row is one line taller while it's there. Deliberately not a reactive
-// ref like emptyHandlers — nothing renders from this, it exists only to tell
-// a real change from a repeated report of the same state.
-const diskCallouts = new Set()
-function setDiskCallouts(key, hasCallouts) {
-  if (diskCallouts.has(key) === hasCallouts) return
-  if (hasCallouts) diskCallouts.add(key)
-  else diskCallouts.delete(key)
+// Same concern as setHandlerEmpty above, for the badges whose call-outs
+// (DiskBadge's `pending`/space-left row, MemBadge's `swap` chip) come and go
+// with live readings: each takes an extra line while it's there, so the box
+// is taller than it was measured at. Keyed per badge, since several can be
+// showing one at once. Deliberately not a reactive ref like emptyHandlers —
+// nothing renders from this, it exists only to tell a real change from a
+// repeated report of the same state.
+const calloutRows = new Set()
+function setCalloutRow(key, hasCallouts) {
+  if (calloutRows.has(key) === hasCallouts) return
+  if (hasCallouts) calloutRows.add(key)
+  else calloutRows.delete(key)
   if (hasEmittedSettled) {
     nextTick(() => emit('recheck-size', props.vm.id))
   }
@@ -236,6 +238,7 @@ defineExpose({ measure })
           :resource-id="vm.id"
           @settled="onBadgeSettled"
           @critical-change="(v) => setCritical('ram', v)"
+          @callouts-change="(v) => setCalloutRow('ram', v)"
         />
         </UContextMenu>
       </div>
@@ -248,7 +251,7 @@ defineExpose({ measure })
           :resource-id="vm.id"
           @settled="onBadgeSettled"
           @critical-change="(v) => setCritical('disk:' + group.disk, v)"
-          @callouts-change="(v) => setDiskCallouts(group.disk, v)"
+          @callouts-change="(v) => setCalloutRow('disk:' + group.disk, v)"
         />
         </UContextMenu>
       </div>

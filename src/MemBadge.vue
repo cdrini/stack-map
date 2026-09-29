@@ -15,9 +15,16 @@ import { openRamExplainer } from './ramExplainer.js'
 const props = defineProps({
   metrics: { type: Array, required: true },
   resourceId: { type: String, required: true },
+  // Whether this badge may break onto a second line when it doesn't fit.
+  // True inside a VM box, where the width is fixed at 164px and the
+  // alternative is the swap chip being clipped off the edge; false in the
+  // server labels of "Group by server", which are absolutely positioned and
+  // free to extend past their box, so wrapping there would split "MEM:"
+  // from its own figures for no benefit.
+  wrap: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['settled', 'critical-change'])
+const emit = defineEmits(['settled', 'critical-change', 'callouts-change'])
 
 // See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
 // lifecycle; this badge just derives its own fields from whatever it last
@@ -36,11 +43,18 @@ const swapElevated = computed(() => data.value?.swapElevated ?? false)
 const color = computed(() => (busy.value !== null ? ramBusyColor(busy.value) : null))
 const critical = computed(() => busy.value !== null && isRamBusyCritical(busy.value))
 watch(critical, (val) => emit('critical-change', val), { immediate: true })
+
+// The swap chip appearing is the only thing that changes this badge's
+// content, and it's what pushes it onto a second line in a space as narrow
+// as a VM box (see the wrapping note in the styles below) — so the box has
+// to re-measure when it does. Same reporting contract as DiskBadge's.
+watch(swapElevated, (val) => emit('callouts-change', val), { immediate: true })
 </script>
 
 <template>
   <div
     class="mem-badge"
+    :class="{ 'mem-badge--nowrap': !wrap }"
     role="button"
     tabindex="0"
     :title="
@@ -76,12 +90,23 @@ watch(critical, (val) => emit('critical-change', val), { immediate: true })
 </template>
 
 <style scoped>
+/* Wraps rather than overflowing: the three figures plus a swap call-out run
+   wider than a VM box, which used to clip the swap chip off the right edge
+   entirely. Left to flexbox rather than being a fixed second row, so it
+   only ever takes the extra line when the content genuinely doesn't fit —
+   a VM with no swap call-out still reads as one line. */
 .mem-badge {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 3px;
+  gap: 2px 3px;
   cursor: help;
   border-radius: 5px;
+}
+
+/* See the `wrap` prop. */
+.mem-badge--nowrap {
+  flex-wrap: nowrap;
 }
 
 .mem-badge:hover {

@@ -582,6 +582,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
                 v-if="partitionMetricFamilies(metricsFor(s.server, 'server')).ramMetrics.length"
                 :metrics="partitionMetricFamilies(metricsFor(s.server, 'server')).ramMetrics"
                 :resource-id="s.server.id"
+                :wrap="false"
               />
               <MetricBadge
                 v-for="metric in partitionMetricFamilies(metricsFor(s.server, 'server')).otherMetrics"
