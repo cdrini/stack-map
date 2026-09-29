@@ -1,3 +1,4 @@
+import { ref } from 'vue'
 import { load } from 'js-yaml'
 import { basePrefix } from './apiBase.js'
 
@@ -15,6 +16,29 @@ export async function loadSpec() {
   spec.externals ??= []
   spec.metrics ??= []
   spec.links ??= []
+}
+
+// Fresher `definition:` anchors than the ones the spec file itself carries,
+// keyed by container id — see /api/spec/definitions, and definitionFor below
+// for how they're applied. Empty until (and unless) that request lands.
+const definitionOverrides = ref({})
+
+// Fetched after the app is already mounted, never before: resolving these
+// can cost a GitHub round trip, and nothing on the map needs them until
+// someone opens a container's right-click menu. Failure is silently fine —
+// the spec's own anchors stay in use, a few lines stale at worst.
+export async function loadDefinitions() {
+  const res = await fetch(`${basePrefix}/api/spec/definitions`)
+  if (!res.ok) throw new Error(`failed to load definition anchors: ${res.status}`)
+  definitionOverrides.value = await res.json()
+}
+
+// A ref read rather than a field mutated on the container itself, because
+// `spec` is a plain object (not reactive) — reading this inside a template's
+// render, as stackMenu.js does, is what makes an already-rendered map pick
+// the anchors up when they arrive.
+export function definitionFor(container) {
+  return definitionOverrides.value[container.id] ?? container.definition
 }
 
 // Any server, VM, container, or external carries a `relationships: [{ to,

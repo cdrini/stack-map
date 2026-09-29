@@ -78,9 +78,17 @@ PROMETHEUS_URL_OVERRIDE = env.STACKMAP_PROMETHEUS_URL_OVERRIDE
 
 # stack.yaml's `definition:` URLs carry line numbers into openlibrary's
 # compose files, and those go stale on their own as the files are edited. They
-# get recomputed on the way out of /api/spec (see compose_refs.py, shared with
-# its CLI) rather than written back into the spec: the spec is an input,
-# mounted read-only, and derived data doesn't belong in it.
+# get recomputed from the compose files (see compose_refs.py, shared with its
+# CLI) rather than written back into the spec: the spec is an input, mounted
+# read-only, and derived data doesn't belong in it.
+#
+# That recomputation is served from its own endpoint rather than folded into
+# /api/spec, because it can need a GitHub round trip and /api/spec is what the
+# frontend blocks on before it can render anything at all (see main.js). Doing
+# both in one response meant a cold cache — every fresh deploy, and once per
+# COMPOSE_RETRY_SECONDS whenever GitHub can't be reached — showed a blank page
+# until GitHub answered. Line anchors are a detail of one right-click menu
+# item; they have no business holding the map hostage.
 COMPOSE_REF = "master"
 # Anchors only move when someone edits a compose file, so this can be slow.
 COMPOSE_TTL_SECONDS = 3600
@@ -180,25 +188,40 @@ async def spec():
     cached at startup, so editing STACKMAP_SPEC_PATH's file takes effect on
     the next browser refresh instead of a server restart.
 
-    Each container's `definition:` line anchor is recomputed against
-    openlibrary's compose files on the way out (see ComposeCache above), so
-    the links stay correct as those files are edited without anyone
-    maintaining the line numbers — or the file on disk, which is mounted
-    read-only, being written to. Served unchanged if the compose files
-    aren't reachable.
+    Deliberately does nothing but read the file: the frontend can't render
+    until this returns, so it must never wait on anything remote. The
+    `definition:` anchors in it are whatever the file says, which may be a
+    few lines stale; /api/spec/definitions below refreshes them afterwards.
     """
-    text = env.STACKMAP_SPEC_PATH.read_text()
+    return env.STACKMAP_SPEC_PATH.read_text()
+
+
+@router.get("/api/spec/definitions")
+async def spec_definitions():
+    """Each container's `definition:` URL, recomputed against openlibrary's
+    compose files — `{container_id: url}`, for the frontend to overlay onto
+    the anchors /api/spec already gave it.
+
+    Free to be slow: it's fetched in the background once the map is already
+    on screen (see spec.js's loadDefinitions), so a cold ComposeCache paying
+    for a GitHub round trip here costs nobody a blank page. Containers whose
+    service can't be resolved are left out rather than guessed at, so the
+    spec's own anchor stays in use for them; likewise an unreachable GitHub
+    returns an empty object rather than an error, since the anchors already
+    in hand are a perfectly good answer.
+    """
     compose = await compose_cache.get()
     if compose is None:
-        return text
+        return {}
+    text = env.STACKMAP_SPEC_PATH.read_text()
     try:
-        resolved, _ = await asyncio.to_thread(
-            compose_refs.rewrite_definitions, text, compose, compose.sha
+        definitions = await asyncio.to_thread(
+            compose_refs.read_definitions, text, compose, compose.sha
         )
     except Exception as e:
         log.warning("could not resolve definition anchors: %s", e)
-        return text
-    return resolved
+        return {}
+    return {d.container: d.url for d in definitions if d.block is not None}
 
 
 @router.get("/api/metrics/latest")

@@ -1,4 +1,4 @@
-import { spec, linksFor, resolveLinkUrl } from './spec.js'
+import { spec, linksFor, resolveLinkUrl, definitionFor } from './spec.js'
 import { faviconUrl } from './favicon.js'
 import { openCpuExplainer } from './cpuExplainer.js'
 import { openRamExplainer } from './ramExplainer.js'
@@ -68,12 +68,13 @@ function containerSection(container) {
   // Unlike links, "View definition" shows up even when there's nothing to
   // open — a container with no `definition:` is worth surfacing as a gap
   // in the spec rather than silently offering one item fewer.
+  const definition = definitionFor(container)
   const items = [
     {
       label: 'View definition',
       icon: 'i-lucide-file-code-2',
-      disabled: !container.definition,
-      onSelect: () => window.open(container.definition, '_blank', 'noopener'),
+      disabled: !definition,
+      onSelect: () => window.open(definition, '_blank', 'noopener'),
     },
   ]
 

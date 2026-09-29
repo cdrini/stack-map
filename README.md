@@ -66,14 +66,26 @@ one of openlibrary's compose files
 service name)` is durable there — the line numbers are derived data that go
 stale the moment anyone inserts a line above the block.
 
-So `GET /api/spec` recomputes them on the way out, resolving each container
-to its service from the container id (`<service>@<vm>`) and the file path
-already in the URL, neither of which rots. Nothing has to be maintained by
-hand, and the spec file — an input, mounted read-only — is never written to.
-The compose files are fetched from GitHub and cached for an hour
-(`ComposeCache` in `server/main.py`, warmed at startup so no request pays for
-it); if they can't be reached, the spec is served exactly as it sits on disk,
-since a link that's a few lines off beats an endpoint that fails.
+So `GET /api/spec/definitions` recomputes them, resolving each container to
+its service from the container id (`<service>@<vm>`) and the file path
+already in the URL, neither of which rots, and returning `{container_id:
+url}` for the frontend to overlay onto what the spec already gave it.
+Nothing has to be maintained by hand, and the spec file — an input, mounted
+read-only — is never written to. The compose files are fetched from GitHub
+and cached for an hour (`ComposeCache` in `server/main.py`, warmed at
+startup); a container whose service doesn't resolve, or a GitHub that can't
+be reached at all, just leaves the spec's own anchor in place, since a link
+that's a few lines off beats an endpoint that fails.
+
+This is deliberately a *second* request, made once the map is already on
+screen (see `loadDefinitions` in `src/spec.js`), rather than part of
+`/api/spec`. The frontend can't render at all until `/api/spec` answers, so
+that endpoint does nothing but read the file off disk. Resolving anchors
+there instead meant every cold `ComposeCache` — each fresh deploy, and once
+per `COMPOSE_RETRY_SECONDS` for as long as GitHub is unreachable — served a
+blank page until GitHub replied, which measured ~8s against a source that
+times out. Line anchors belong to one right-click menu item; they shouldn't
+hold the map hostage.
 
 `server/compose_refs.py` holds that derivation, and doubles as a CLI for
 one-off runs and for rewriting the file on disk:
