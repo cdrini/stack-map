@@ -23,6 +23,14 @@ components.d.ts
 # location is just where local dev expects to find it.
 src/stack.yaml
 
+# Local working notes — names internal hostnames/tunnels, same reasoning as
+# the spec above.
+CLAUDE.local.md
+
+# Local dev overrides of vite.config.js — e.g. proxying /api to a port other
+# than 8000 when something else in the sandbox already holds it.
+vite.config.local.*
+
 # Python (server/)
 .venv
 __pycache__
