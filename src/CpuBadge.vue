@@ -23,7 +23,7 @@ const busyMetric = computed(() => props.metrics.find((m) => m.type === 'cpu-busy
 
 // See useMetric.js — handles the mount+refresh+status lifecycle; this
 // badge just derives its own fields from whatever it last fetched.
-const { status, data, errorMessage } = useMetric(
+const { status, data, errorMessage, isStale } = useMetric(
   () => fetchCpuMetrics(props.metrics, props.resourceId),
   () => emit('settled')
 )
@@ -43,6 +43,7 @@ watch(critical, (val) => emit('critical-change', val), { immediate: true })
 <template>
   <div
     class="cpu-badge"
+    :class="{ 'metric-stale': isStale }"
     role="button"
     tabindex="0"
     :title="

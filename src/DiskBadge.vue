@@ -32,7 +32,7 @@ const label = computed(() => (props.multiDisk ? `DISK ${props.disk}:` : 'DISK:')
 // See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
 // lifecycle; this badge just derives its own fields from whatever it last
 // fetched.
-const { status, data, errorMessage } = useMetric(
+const { status, data, errorMessage, isStale } = useMetric(
   () => fetchDiskMetrics(props.metrics, props.resourceId),
   () => emit('settled')
 )
@@ -74,6 +74,7 @@ watch(hasCallouts, (val) => emit('callouts-change', val), { immediate: true })
 <template>
   <div
     class="disk-badge"
+    :class="{ 'metric-stale': isStale }"
     role="button"
     tabindex="0"
     :title="

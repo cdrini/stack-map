@@ -26,7 +26,7 @@ const requestRateMetric = computed(() => props.metrics.find((m) => m.type === 's
 // See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
 // lifecycle; this badge just derives its own fields from whatever it last
 // fetched.
-const { status, data, errorMessage } = useMetric(
+const { status, data, errorMessage, isStale } = useMetric(
   () => fetchSolrMetrics(props.metrics, props.resourceId),
   () => emit('settled')
 )
@@ -70,6 +70,7 @@ watch(isEmpty, (val) => emit('empty-change', val), { immediate: true })
 <template>
   <div
     class="solr-badge"
+    :class="{ 'metric-stale': isStale }"
     :title="
       status === 'error' ? `fetch failed: ${errorMessage}` : requestRateMetric && resolveMetricQuery(requestRateMetric, resourceId)
     "

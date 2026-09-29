@@ -25,7 +25,7 @@ const sessionsMetric = computed(() => props.metrics.find((m) => m.type === 'hapr
 // See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
 // lifecycle; this badge just derives its own fields from whatever it last
 // fetched.
-const { status, data, errorMessage } = useMetric(
+const { status, data, errorMessage, isStale } = useMetric(
   () => fetchHaproxyMetrics(props.metrics, props.resourceId),
   () => emit('settled')
 )
@@ -48,6 +48,7 @@ watch(critical, (val) => emit('critical-change', val), { immediate: true })
 <template>
   <div
     class="haproxy-badge"
+    :class="{ 'metric-stale': isStale }"
     :title="
       status === 'error' ? `fetch failed: ${errorMessage}` : sessionsMetric && resolveMetricQuery(sessionsMetric, resourceId)
     "

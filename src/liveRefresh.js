@@ -16,19 +16,43 @@ export const refreshTick = ref(0)
 // because the tab regained visibility.
 const pageVisible = ref(document.visibilityState !== 'hidden')
 
+// A coarse shared clock, so "how long since this reading arrived" can be a
+// computed (see useMetric.js's isStale) instead of every badge on the map
+// owning its own timer. One second is far finer than the staleness it's used
+// to detect, and it only runs while live refresh does — when nothing is
+// refreshing, nothing is going stale either.
+const CLOCK_INTERVAL_MS = 1000
+export const clockTick = ref(Date.now())
+
 let intervalId = null
+let clockId = null
 
 function stopInterval() {
-  if (!intervalId) return
-  clearInterval(intervalId)
-  intervalId = null
+  if (intervalId) {
+    clearInterval(intervalId)
+    intervalId = null
+  }
+  if (clockId) {
+    clearInterval(clockId)
+    clockId = null
+  }
 }
 
 function startInterval() {
-  if (intervalId) return
-  intervalId = setInterval(() => {
-    refreshTick.value++
-  }, REFRESH_INTERVAL_MS)
+  if (!intervalId) {
+    intervalId = setInterval(() => {
+      refreshTick.value++
+    }, REFRESH_INTERVAL_MS)
+  }
+  if (!clockId) {
+    // Bumped immediately as well as on the interval, so a badge that was
+    // already stale when live refresh got switched back on says so at once
+    // rather than up to a second later.
+    clockTick.value = Date.now()
+    clockId = setInterval(() => {
+      clockTick.value = Date.now()
+    }, CLOCK_INTERVAL_MS)
+  }
 }
 
 function syncTimer() {

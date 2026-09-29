@@ -21,7 +21,7 @@ const emit = defineEmits(['settled'])
 // fetched. `data` here is the raw backend result itself ({value,
 // timestamp, window}), not a composite object like the other badges'
 // fetchXMetrics — there's nothing to derive beyond unwrapping `.value`.
-const { status, data, errorMessage } = useMetric(
+const { status, data, errorMessage, isStale } = useMetric(
   () => fetchLatestMetric(props.metric, props.resourceId),
   () => emit('settled')
 )
@@ -51,6 +51,7 @@ const display = computed(() => {
 <template>
   <div
     class="metric-badge"
+    :class="{ 'metric-stale': isStale }"
     :title="status === 'error' ? `fetch failed: ${errorMessage}` : resolveMetricQuery(metric, resourceId)"
   >
     <span v-if="status === 'loading'" class="metric-badge__value metric-badge__value--loading">…</span>

@@ -42,3 +42,31 @@ body {
 #app {
   min-height: 100svh;
 }
+
+/* A metric whose reading has outlived the refresh that should have replaced
+   it (see useMetric.js's isStale) pulses, so "this number is being
+   recomputed" reads at a glance without moving anything: opacity only, since
+   a VM box's real geometry is measured from the DOM and anything affecting
+   size would mean re-measuring it on every frame.
+
+   Global rather than per-badge scoped CSS because all six metric badges
+   share it, and @keyframes can't be, so the alternative was six copies. */
+@keyframes metric-stale-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.metric-stale {
+  animation: metric-stale-pulse 1.4s ease-in-out infinite;
+}
+
+/* Flashing is exactly what this media query exists to suppress. The state
+   still needs to be legible though, so it degrades to a steady dimming —
+   same signal, no motion. */
+@media (prefers-reduced-motion: reduce) {
+  .metric-stale {
+    animation: none;
+    opacity: 0.55;
+  }
+}

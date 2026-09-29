@@ -29,7 +29,7 @@ const emit = defineEmits(['settled', 'critical-change', 'callouts-change'])
 // See useMetric.js/CpuBadge.vue — handles the mount+refresh+status
 // lifecycle; this badge just derives its own fields from whatever it last
 // fetched.
-const { status, data, errorMessage } = useMetric(
+const { status, data, errorMessage, isStale } = useMetric(
   () => fetchRamMetrics(props.metrics, props.resourceId),
   () => emit('settled')
 )
@@ -54,7 +54,7 @@ watch(swapElevated, (val) => emit('callouts-change', val), { immediate: true })
 <template>
   <div
     class="mem-badge"
-    :class="{ 'mem-badge--nowrap': !wrap }"
+    :class="{ 'mem-badge--nowrap': !wrap, 'metric-stale': isStale }"
     role="button"
     tabindex="0"
     :title="
