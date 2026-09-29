@@ -7,6 +7,9 @@ import { diskExplainerOpen, closeDiskExplainer } from './diskExplainer.js'
   <UModal :open="diskExplainerOpen" title="Disk metrics" @update:open="(v) => !v && closeDiskExplainer()">
     <template #body>
       <dl class="disk-explainer__list">
+        <dt><span class="disk-explainer__chip disk-explainer__chip--plain">Fill</span></dt>
+        <dd>How full this disk's filesystem is — hover it for the bytes.</dd>
+
         <dt><span class="disk-explainer__chip disk-explainer__chip--busy">Busy</span></dt>
         <dd>
           collectd's <code>disk_io_time</code> — the share of each second the disk spent servicing
@@ -20,6 +23,9 @@ import { diskExplainerOpen, closeDiskExplainer } from './diskExplainer.js'
           waiting rather than completing immediately. A brief blip is normal; a sustained value
           means the disk can't keep up with demand. Only shown when it climbs above 1.
         </dd>
+
+        <dt><span class="disk-explainer__chip disk-explainer__chip--error">GB left</span></dt>
+        <dd>Free space left, shown only once it drops under 2GB.</dd>
       </dl>
     </template>
   </UModal>
@@ -68,5 +74,16 @@ import { diskExplainerOpen, closeDiskExplainer } from './diskExplainer.js'
 .disk-explainer__chip--warn {
   color: #9a3412;
   background: #ffedd5;
+}
+
+.disk-explainer__chip--plain {
+  font-weight: 400;
+  color: #64748b;
+  background: none;
+}
+
+.disk-explainer__chip--error {
+  color: #b91c1c;
+  background: #fee2e2;
 }
 </style>

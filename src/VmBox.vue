@@ -147,6 +147,21 @@ function setHandlerEmpty(key, isEmptyValue) {
   }
 }
 
+// Same concern as setHandlerEmpty above, for DiskBadge's call-out row (see
+// its `hasCallouts`): it appears and disappears with live readings, and a
+// disk row is one line taller while it's there. Deliberately not a reactive
+// ref like emptyHandlers — nothing renders from this, it exists only to tell
+// a real change from a repeated report of the same state.
+const diskCallouts = new Set()
+function setDiskCallouts(key, hasCallouts) {
+  if (diskCallouts.has(key) === hasCallouts) return
+  if (hasCallouts) diskCallouts.add(key)
+  else diskCallouts.delete(key)
+  if (hasEmittedSettled) {
+    nextTick(() => emit('recheck-size', props.vm.id))
+  }
+}
+
 const rootEl = ref(null)
 const containerEls = {}
 function setContainerEl(id, el) {
@@ -233,6 +248,7 @@ defineExpose({ measure })
           :resource-id="vm.id"
           @settled="onBadgeSettled"
           @critical-change="(v) => setCritical('disk:' + group.disk, v)"
+          @callouts-change="(v) => setDiskCallouts(group.disk, v)"
         />
         </UContextMenu>
       </div>
@@ -403,11 +419,17 @@ defineExpose({ measure })
   flex-direction: column;
 }
 
+/* min-height, not a hard height: a badge in here can need a second line
+   (see DiskBadge.vue's call-out row), and the box is measured from real DOM
+   geometry rather than assumed, so there's nothing to clip against
+   vertically. overflow stays hidden for the horizontal axis, where a row
+   genuinely can run wider than the box (e.g. MEM's three figures plus a
+   swap call-out) and clipping is preferable to spilling outside it. */
 .map-vm__metrics-row {
   display: flex;
   align-items: center;
   gap: 3px;
-  height: 14px;
+  min-height: 14px;
   overflow: hidden;
 }
 

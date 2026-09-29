@@ -24,15 +24,22 @@ function untrackPending() {
   if (pendingRequestCount.value === 0) pendingRequestTotal.value = 0
 }
 
-// haproxy-*/solr-* metrics are Prometheus-backed rather than Graphite-backed
-// — this decides which backend endpoint a chunk of same-source queries goes
+// Which metric types are Prometheus-backed rather than Graphite-backed —
+// this decides which backend endpoint a chunk of same-source queries goes
 // to (see fetchChunk). Keyed off the metric's `type` rather than comparing
 // its `source` against the real Prometheus hostname, so that hostname never
 // has to appear in client-shipped code (it's already kept out of the repo —
 // see stack.yaml/STACKMAP_SPEC_PATH — this is the same concern applied to
 // the built bundle).
+//
+// The whole haproxy-*/solr-* families are Prometheus-backed, so they match
+// by prefix; the disk-* family is split across both backends (collectd for
+// I/O, node_exporter for filesystem capacity — see stack.yaml), so those
+// two are named individually rather than by prefix.
+const PROMETHEUS_METRIC_TYPES = new Set(['disk-size', 'disk-avail'])
+
 function isPrometheusBacked(type) {
-  return type.startsWith('haproxy-') || type.startsWith('solr-')
+  return type.startsWith('haproxy-') || type.startsWith('solr-') || PROMETHEUS_METRIC_TYPES.has(type)
 }
 
 // Substitutes `{{id}}` in a metric's `query` template with the id of
@@ -245,7 +252,7 @@ const RAM_METRIC_TYPES = new Set([
   'swap-used',
   'swap-free',
 ])
-const DISK_METRIC_TYPES = new Set(['disk-busy', 'disk-pending'])
+const DISK_METRIC_TYPES = new Set(['disk-busy', 'disk-pending', 'disk-size', 'disk-avail'])
 const HAPROXY_METRIC_TYPES = new Set([
   'haproxy-sessions',
   'haproxy-limit',
@@ -423,31 +430,69 @@ export async function fetchRamMetrics(ramMetrics, resourceId) {
 const PENDING_THRESHOLD = 1 // queued ops — above this, requests are actually backing up,
 // not just an occasional single-op blip (healthy VMs sit at 0 essentially always)
 
-// `diskMetrics` is whatever subset of disk-busy/disk-pending this resource
-// actually has (from partitionMetricFamilies) — disk-pending is optional,
-// disk-busy is not.
+// Absolute headroom, not a fill %, because the two say different things: a
+// 98%-full 2TB data disk still has 40GB to work with, while a 90%-full 20GB
+// root disk is nearly out. What actually breaks things (a failed write, a
+// log that can't rotate, a package that can't unpack) is bytes remaining, so
+// that's what's alarmed on — fill % is shown for context but left uncolored.
+const LOW_SPACE_BYTES = 2 * 1024 ** 3 // 2 GiB
+
+// `diskMetrics` is whatever subset of disk-busy/disk-pending/disk-size/
+// disk-avail this resource actually has (from partitionMetricFamilies).
+//
+// Unlike the other families here, none of these is individually required:
+// this one spans two backends (collectd for I/O, node_exporter for
+// capacity), so one being unreachable shouldn't cost us the readings the
+// other is still serving perfectly well. Only a resource with nothing at
+// all to report fails; anything else renders whatever it has.
 export async function fetchDiskMetrics(diskMetrics, resourceId) {
   const byType = Object.fromEntries(diskMetrics.map((m) => [m.type, m]))
   const busyMetric = byType['disk-busy']
-  if (!busyMetric) throw new Error('disk-busy metric not configured for this resource')
 
-  const [ioTime, pending] = await Promise.allSettled([
-    fetchLatestMetric(busyMetric, resourceId),
+  const [ioTime, pending, size, avail] = await Promise.allSettled([
+    busyMetric
+      ? fetchLatestMetric(busyMetric, resourceId)
+      : Promise.reject(new Error('disk-busy not configured')),
     byType['disk-pending']
       ? fetchLatestMetric(byType['disk-pending'], resourceId)
       : Promise.reject(new Error('disk-pending not configured')),
+    byType['disk-size']
+      ? fetchLatestMetric(byType['disk-size'], resourceId)
+      : Promise.reject(new Error('disk-size not configured')),
+    byType['disk-avail']
+      ? fetchLatestMetric(byType['disk-avail'], resourceId)
+      : Promise.reject(new Error('disk-avail not configured')),
   ])
 
-  if (ioTime.status !== 'fulfilled') {
-    throw new Error(ioTime.reason instanceof Error ? ioTime.reason.message : String(ioTime.reason))
+  // node_exporter reports raw byte counters, not a percentage, so fill % is
+  // derived here — the same shape as fetchRamMetrics computing one normalized
+  // number from collectd's raw memory counters. Deriving it from these two
+  // readings (rather than asking Prometheus for the percentage as a third
+  // query) is also what lets the badge's tooltip show the bytes behind the
+  // figure without them ever disagreeing with it.
+  const haveCapacity = size.status === 'fulfilled' && avail.status === 'fulfilled' && size.value.value > 0
+  const usedBytes = haveCapacity ? size.value.value - avail.value.value : null
+
+  // The two figures this badge can lead with. Neither present means there's
+  // genuinely nothing to show, which is an error; either one is enough. The
+  // I/O failure is the one reported, since disk-busy is the metric every VM
+  // is expected to have.
+  if (ioTime.status !== 'fulfilled' && !haveCapacity) {
+    const { reason } = ioTime
+    throw new Error(reason instanceof Error ? reason.message : String(reason))
   }
 
   // disk_io_time.io_time is collectd's ms-of-I/O-per-second rate (0-1000),
   // i.e. the same thing `iostat %util` shows — divide by 10 for 0-100%.
   return {
-    busy: ioTime.value.value / 10,
+    busy: ioTime.status === 'fulfilled' ? ioTime.value.value / 10 : null,
     pending: pending.status === 'fulfilled' ? pending.value.value : null,
     pendingElevated: pending.status === 'fulfilled' && pending.value.value > PENDING_THRESHOLD,
+    fill: haveCapacity ? (usedBytes / size.value.value) * 100 : null,
+    usedBytes,
+    totalBytes: haveCapacity ? size.value.value : null,
+    availBytes: avail.status === 'fulfilled' ? avail.value.value : null,
+    availLow: avail.status === 'fulfilled' && avail.value.value < LOW_SPACE_BYTES,
   }
 }
 
