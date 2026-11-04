@@ -8,7 +8,14 @@
 // strain isn't purely compute-bound.
 
 import { computed, watch } from 'vue'
-import { cpuBusyColor, isCpuBusyCritical, fetchCpuMetrics, resolveMetricQuery } from './metrics.js'
+import {
+  cpuBusyColor,
+  cpuStealColor,
+  isCpuBusyCritical,
+  cpuBusyMetric,
+  fetchCpuMetrics,
+  resolveMetricQuery,
+} from './metrics.js'
 import { useMetric } from './useMetric.js'
 import { openCpuExplainer } from './cpuExplainer.js'
 
@@ -19,7 +26,7 @@ const props = defineProps({
 
 const emit = defineEmits(['settled', 'critical-change'])
 
-const busyMetric = computed(() => props.metrics.find((m) => m.type === 'cpu-busy'))
+const busyMetric = computed(() => cpuBusyMetric(props.metrics))
 
 // See useMetric.js — handles the mount+refresh+status lifecycle; this
 // badge just derives its own fields from whatever it last fetched.
@@ -33,7 +40,17 @@ const waitElevated = computed(() => data.value?.waitElevated ?? false)
 const steal = computed(() => data.value?.steal ?? null)
 const stealElevated = computed(() => data.value?.stealElevated ?? false)
 
+// Called from script scope, not inlined in the template: a template
+// unwraps `data` to its current value, and the modal wants the ref itself
+// so it keeps seeing this badge's refreshes while it's open.
+function explain() {
+  openCpuExplainer({ resourceId: props.resourceId, data })
+}
+
 const color = computed(() => (busy.value !== null ? cpuBusyColor(busy.value) : null))
+// Steal is only ever drawn once it's past its first tier, so this is never
+// the plain one.
+const stealColor = computed(() => (steal.value !== null ? cpuStealColor(steal.value) : null))
 const critical = computed(() => busy.value !== null && isCpuBusyCritical(busy.value))
 // `immediate` reports the initial (non-critical) state right away, so the
 // parent VM box doesn't have to assume "not critical yet" on its own.
@@ -51,8 +68,8 @@ watch(critical, (val) => emit('critical-change', val), { immediate: true })
         ? `fetch failed: ${errorMessage}`
         : busyMetric && resolveMetricQuery(busyMetric, resourceId)) + ' — click for what these mean'
     "
-    @click="openCpuExplainer()"
-    @keydown.enter="openCpuExplainer()"
+    @click="explain()"
+    @keydown.enter="explain()"
   >
     <span class="cpu-badge__label">CPU:</span>
     <span v-if="status === 'loading'" class="cpu-badge__chip cpu-badge__chip--loading">…</span>
@@ -75,7 +92,8 @@ watch(critical, (val) => emit('critical-change', val), { immediate: true })
     </span>
     <span
       v-if="stealElevated"
-      class="cpu-badge__chip cpu-badge__chip--warn"
+      class="cpu-badge__chip"
+      :style="{ color: stealColor.color, background: stealColor.background }"
       title="elevated CPU steal — the underlying VM host may be oversubscribed"
     >
       steal {{ steal.toFixed(0) }}%

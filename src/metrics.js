@@ -24,24 +24,6 @@ function untrackPending() {
   if (pendingRequestCount.value === 0) pendingRequestTotal.value = 0
 }
 
-// Which metric types are Prometheus-backed rather than Graphite-backed —
-// this decides which backend endpoint a chunk of same-source queries goes
-// to (see fetchChunk). Keyed off the metric's `type` rather than comparing
-// its `source` against the real Prometheus hostname, so that hostname never
-// has to appear in client-shipped code (it's already kept out of the repo —
-// see stack.yaml/STACKMAP_SPEC_PATH — this is the same concern applied to
-// the built bundle).
-//
-// The whole haproxy-*/solr-* families are Prometheus-backed, so they match
-// by prefix; the disk-* family is split across both backends (collectd for
-// I/O, node_exporter for filesystem capacity — see stack.yaml), so those
-// two are named individually rather than by prefix.
-const PROMETHEUS_METRIC_TYPES = new Set(['disk-size', 'disk-avail'])
-
-function isPrometheusBacked(type) {
-  return type.startsWith('haproxy-') || type.startsWith('solr-') || PROMETHEUS_METRIC_TYPES.has(type)
-}
-
 // Substitutes `{{id}}` in a metric's `query` template with the id of
 // whatever entity it's attached to — see the `metrics` doc comment at the
 // top of stack.yaml.
@@ -146,11 +128,10 @@ async function fetchChunk(source, items) {
   const params = new URLSearchParams({ source })
   for (const item of items) params.append('query', item.query)
 
-  // Every item here shares one `source`, which in practice names exactly
-  // one backend — take it from the first item rather than re-deriving it.
-  const endpoint = items[0].isPrometheus ? '/api/metrics/prometheus/latest' : '/api/metrics/latest'
+  // Which backend serves this chunk is the server's call, decided from the
+  // `source` every item in it shares — see /api/metrics/latest.
   try {
-    const res = await fetch(`${basePrefix}${endpoint}?${params}`)
+    const res = await fetch(`${basePrefix}/api/metrics/latest?${params}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     for (const item of items) {
@@ -171,7 +152,7 @@ async function fetchChunk(source, items) {
 // every query only ever actually goes out once per refresh.
 const inFlight = new Map() // cacheKey -> Promise
 
-function fetchOne(source, query, resourceId, isPrometheus) {
+function fetchOne(source, query, resourceId) {
   const key = cacheKey(source, query)
   const cached = resultCache.get(key)
   if (cached && Date.now() - cached.fetchedAt < REFRESH_INTERVAL_MS) {
@@ -187,7 +168,6 @@ function fetchOne(source, query, resourceId, isPrometheus) {
     pendingBySource.get(source).push({
       query,
       resourceId,
-      isPrometheus,
       resolve: (result) => {
         resultCache.set(key, { result, fetchedAt: Date.now() })
         inFlight.delete(key)
@@ -230,7 +210,7 @@ function pickAtTime(window, targetSeconds) {
 // point that's since scrolled out of the trailing window degrades to
 // "closest available", not a broken badge.
 export async function fetchLatestMetric(metric, resourceId) {
-  const result = await fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId, isPrometheusBacked(metric.type))
+  const result = await fetchOne(metric.source, resolveMetricQuery(metric, resourceId), resourceId)
   if (!effectiveRewindTime.value) return result
   const picked = pickAtTime(result.window, effectiveRewindTime.value.getTime() / 1000)
   return picked ? { ...result, value: picked.value, timestamp: picked.timestamp } : result
@@ -241,7 +221,7 @@ export async function fetchLatestMetric(metric, resourceId) {
 // badge per raw metric — this splits a resource's full metrics list into
 // those families plus everything else, so the caller can render each
 // family once and hand whatever's left to the generic per-metric badge.
-const CPU_METRIC_TYPES = new Set(['cpu-busy', 'cpu-wait', 'cpu-steal'])
+const CPU_METRIC_TYPES = new Set(['cpu-busy', 'cpu-idle', 'cpu-wait', 'cpu-steal'])
 const RAM_METRIC_TYPES = new Set([
   'mem-used',
   'mem-free',
@@ -330,18 +310,40 @@ export function groupSolrMetricsByHandler(solrMetrics) {
     .map(([handler, metrics]) => ({ handler, metrics }))
 }
 
-const WAIT_THRESHOLD = 10 // % — above this, treat as disk/network-bound, not just "busy"
-const STEAL_THRESHOLD = 5 // % — above this, the VM host itself looks oversubscribed
+export const WAIT_THRESHOLD = 10 // % — above this, treat as disk/network-bound, not just "busy"
+// Steal takes two steps rather than one: a few percent means the host is
+// contended, while sustained double digits means this VM is being starved
+// badly enough that its own numbers stop meaning much — worth the same red
+// as a pegged CPU. Below the first step it isn't shown at all.
+export const CPU_STEAL_TIERS = [
+  { max: 5, plain: true, bar: '#cbd5e1' }, // not worth showing
+  { max: 10, color: '#9a3412', background: '#ffedd5', bar: '#fb923c' }, // orange
+  { max: Infinity, color: '#b91c1c', background: '#fee2e2', bar: '#ef4444' }, // red
+]
 
-// `cpuMetrics` is whatever subset of cpu-busy/cpu-wait/cpu-steal this
-// resource actually has (from partitionMetricFamilies) — wait/steal are
-// optional, cpu-busy is not.
+export const STEAL_THRESHOLD = CPU_STEAL_TIERS[0].max
+
+export function cpuStealColor(stealPercent) {
+  return CPU_STEAL_TIERS.find((tier) => stealPercent < tier.max) ?? CPU_STEAL_TIERS.at(-1)
+}
+
+// Busy % comes in two shapes, because the two backends report it
+// differently and both are in use: `cpu-idle` is what collectd has (there is
+// no percent-busy, so the figure is inverted here), while `cpu-busy` is a
+// query that already did that arithmetic — node_exporter's counters have to
+// be turned into a percentage in PromQL anyway, so there's nothing left for
+// this to invert. A resource needs one or the other; wait/steal are optional
+// and read the same either way.
+export function cpuBusyMetric(cpuMetrics) {
+  return cpuMetrics.find((m) => m.type === 'cpu-idle' || m.type === 'cpu-busy')
+}
+
 export async function fetchCpuMetrics(cpuMetrics, resourceId) {
   const byType = Object.fromEntries(cpuMetrics.map((m) => [m.type, m]))
-  const busyMetric = byType['cpu-busy']
-  if (!busyMetric) throw new Error('cpu-busy metric not configured for this resource')
+  const busyMetric = cpuBusyMetric(cpuMetrics)
+  if (!busyMetric) throw new Error('neither cpu-idle nor cpu-busy configured for this resource')
 
-  const [idle, wait, steal] = await Promise.allSettled([
+  const [primary, wait, steal] = await Promise.allSettled([
     fetchLatestMetric(busyMetric, resourceId),
     byType['cpu-wait']
       ? fetchLatestMetric(byType['cpu-wait'], resourceId)
@@ -351,12 +353,12 @@ export async function fetchCpuMetrics(cpuMetrics, resourceId) {
       : Promise.reject(new Error('cpu-steal not configured')),
   ])
 
-  if (idle.status !== 'fulfilled') {
-    throw new Error(idle.reason instanceof Error ? idle.reason.message : String(idle.reason))
+  if (primary.status !== 'fulfilled') {
+    throw new Error(primary.reason instanceof Error ? primary.reason.message : String(primary.reason))
   }
 
   return {
-    busy: 100 - idle.value.value,
+    busy: busyMetric.type === 'cpu-idle' ? 100 - primary.value.value : primary.value.value,
     wait: wait.status === 'fulfilled' ? wait.value.value : null,
     waitElevated: wait.status === 'fulfilled' && wait.value.value > WAIT_THRESHOLD,
     steal: steal.status === 'fulfilled' ? steal.value.value : null,
@@ -617,11 +619,15 @@ export function formatGiB(bytes, decimals = 1) {
 // The healthy tier is deliberately `plain` (no color/bold) rather than
 // green — a badge should only draw the eye when there's something to
 // look at, not for every normal reading.
-const CPU_BUSY_TIERS = [
-  { max: 50, plain: true }, // healthy
-  { max: 75, color: '#854d0e', background: '#fef9c3' }, // yellow
-  { max: 90, color: '#9a3412', background: '#ffedd5' }, // orange
-  { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
+// `color`/`background` dress a chip, where the text carries the meaning and
+// the fill only tints behind it. `bar` is the same tier as a solid block
+// with nothing on top, which needs to hold its own against white — see
+// CpuExplainerModal's zone bars.
+export const CPU_BUSY_TIERS = [
+  { max: 60, plain: true, bar: '#cbd5e1' }, // healthy
+  { max: 80, color: '#854d0e', background: '#fef9c3', bar: '#facc15' }, // yellow
+  { max: 90, color: '#9a3412', background: '#ffedd5', bar: '#fb923c' }, // orange
+  { max: Infinity, color: '#b91c1c', background: '#fee2e2', bar: '#ef4444' }, // red
 ]
 
 const RAM_BUSY_TIERS = [

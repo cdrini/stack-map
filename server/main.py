@@ -226,10 +226,15 @@ async def spec_definitions():
 
 @router.get("/api/metrics/latest")
 async def metrics_latest(source: str, query: list[str] = Query(...)):
-    """Latest datapoint (plus a trailing window — see WINDOW_SECONDS) for
-    one or more metrics in a single Graphite round trip (Graphite's
-    /render accepts repeated `target` params natively) — e.g. GET
-    /api/metrics/latest?source=http://graphite.../render&query=a&query=b.
+    """Latest datapoint (plus a trailing window — see WINDOW_SECONDS) for one
+    or more metrics — e.g. GET /api/metrics/latest?source=<src>&query=a&query=b.
+
+    Which backend answers is decided here, from `source`, rather than by the
+    caller picking an endpoint: the source is the only thing that actually
+    knows. That matters now that a metric family can be served by either one
+    — CPU comes from node_exporter for VMs and from collectd for the
+    bare-metal servers — so the backend can't be inferred from a metric's
+    type, and the frontend is better off not trying.
 
     Always returns an object keyed by query, `{query: {value, timestamp,
     window}}`, even for a single query — the frontend's batching layer
@@ -242,6 +247,8 @@ async def metrics_latest(source: str, query: list[str] = Query(...)):
     target is just silently absent from its response, not an error, so
     partial results are the normal case here, not a fallback.
     """
+    if source in PROMETHEUS_SOURCES:
+        return await _fetch_prometheus(source, query)
     if source not in ALLOWED_SOURCES:
         raise HTTPException(status_code=400, detail=f"source not allowed: {source}")
 
@@ -292,18 +299,13 @@ async def _fetch_prometheus_one(client: httpx.AsyncClient, base: str, query: str
     return query, {"value": latest["value"], "timestamp": latest["timestamp"], "window": window}
 
 
-@router.get("/api/metrics/prometheus/latest")
-async def prometheus_metrics_latest(source: str, query: list[str] = Query(...)):
-    """Same contract as /api/metrics/latest (including the `window` field —
-    see WINDOW_SECONDS), but for Prometheus — one request per query, fired
-    concurrently so an N-query batch still costs one round trip's worth of
-    wall-clock time rather than N sequential ones. Uses the range-query API
-    rather than an instant query, which by construction can't return a
-    window at all.
+async def _fetch_prometheus(source: str, query: list[str]):
+    """Same contract as the Graphite half above (including the `window` field
+    — see WINDOW_SECONDS), but one request per query, fired concurrently so an
+    N-query batch still costs one round trip's worth of wall-clock time rather
+    than N sequential ones. Uses the range-query API rather than an instant
+    query, which by construction can't return a window at all.
     """
-    if source not in PROMETHEUS_SOURCES:
-        raise HTTPException(status_code=400, detail=f"source not allowed: {source}")
-
     base = PROMETHEUS_URL_OVERRIDE or source
     async with httpx.AsyncClient(timeout=10.0) as client:
         results = await asyncio.gather(*(_fetch_prometheus_one(client, base, q) for q in query))

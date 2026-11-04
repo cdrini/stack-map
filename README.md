@@ -126,6 +126,14 @@ cp .env.example .env  # then edit .env with the real hostnames
 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-`GET /api/metrics/latest?source=<url>&query=<target>` → latest datapoint for
-one Graphite target. `source` is checked against a small allowlist (from
-`.env`, not the request) rather than proxying anywhere a caller asks.
+`GET /api/metrics/latest?source=<url>&query=<target>` → latest datapoint (and
+a trailing window) for one or more targets. `source` is checked against the
+allowlists from `.env`, not the request, rather than proxying anywhere a
+caller asks — and it's also what selects the backend: a Graphite source is
+fetched from Graphite, a Prometheus one from Prometheus, with the same
+response shape either way.
+
+Deciding that here rather than in the frontend is what lets one metric family
+be served by both. CPU is: VMs read it from node_exporter via Prometheus,
+while the bare-metal servers, which have no node_exporter, stay on collectd
+via Graphite.
