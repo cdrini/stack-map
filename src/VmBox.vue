@@ -25,6 +25,8 @@ const props = defineProps({
   // everything it has a direct relationship with — null when nothing's
   // hovered, meaning no dimming. See MapView.vue's attachedContainerIds.
   attachedContainerIds: { type: Set, default: null },
+  // Behind the toolbar's overflow menu, off by default — see MapView.vue.
+  showIp: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['recheck-size', 'hover-container'])
@@ -219,9 +221,10 @@ defineExpose({ measure })
       </span>
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
-    <div v-if="vm.ip" class="map-vm__ip">{{ vm.ip }}</div>
-
-    <div class="map-vm__divider"></div>
+    <template v-if="showIp && vm.ip">
+      <div class="map-vm__ip">{{ vm.ip }}</div>
+      <div class="map-vm__divider"></div>
+    </template>
 
     <div v-if="hasMetrics" class="map-vm__metrics">
       <div v-if="cpuMetrics.length" class="map-vm__metrics-row">

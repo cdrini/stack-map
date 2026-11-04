@@ -26,6 +26,7 @@ import { usePanZoom } from './usePanZoom.js'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
+import UDropdownMenu from '@nuxt/ui/components/DropdownMenu.vue'
 import VmBox from './VmBox.vue'
 import ExternalNode from './ExternalNode.vue'
 import ContainerNode from './ContainerNode.vue'
@@ -38,6 +39,28 @@ import RewindTimeline from './RewindTimeline.vue'
 // header — now that all controls float directly on the map itself, it's
 // just local state like everything else here.
 const hoverDimEnabled = ref(true)
+
+// Off by default: an address is reference material you go looking for, not
+// something worth a row on every box all the time.
+const showIp = ref(false)
+
+// The overflow menu behind the toolbar's "…" — settings that are worth
+// having but not worth the width of a permanent checkbox. `onSelect`
+// swallows the default close, so several can be toggled in one visit.
+const viewOptions = computed(() =>
+  [
+    { label: 'Dim unrelated on hover', model: hoverDimEnabled },
+    { label: 'Show IP', model: showIp },
+  ].map(({ label, model }) => ({
+    label,
+    type: 'checkbox',
+    checked: model.value,
+    onUpdateChecked: (checked) => {
+      model.value = checked
+    },
+    onSelect: (e) => e.preventDefault(),
+  }))
+)
 
 // "queries" edges (every container hitting a database/cache/backend) are
 // the vast majority of edges on this map and mostly just add visual
@@ -236,6 +259,15 @@ function onRecheckSizeContainer(containerId) {
   sizes.set(containerId, measurement)
   measuredContainerSizes.value = sizes
 }
+
+// The IP row makes every VM box a line taller, and the layout is driven by
+// measured sizes rather than predicted ones — so they all have to be
+// re-measured when it appears or disappears. Boxes not currently mounted
+// (a container-granularity view, say) correct themselves on their next
+// mount, when their badges settle and report in.
+watch(showIp, () => {
+  nextTick(() => Object.keys(realVmRefs).forEach(onRecheckSize))
+})
 
 // Grouping by server positions VMs topologically within their own server's
 // box (see mapLayout.js's layoutServer), but that's scoped to one server at
@@ -517,7 +549,17 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
         label="Show requests"
         title="'queries' edges — hidden by default since there are a lot of them; still factor into the layout either way"
       />
-      <UCheckbox v-model="hoverDimEnabled" label="Dim unrelated on hover" />
+      <UDropdownMenu :items="viewOptions" size="sm" :content="{ align: 'end', side: 'top' }">
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="outline"
+          square
+          icon="i-lucide-ellipsis"
+          aria-label="More view options"
+          title="More view options"
+        />
+      </UDropdownMenu>
     </div>
     </div>
 
@@ -602,6 +644,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
               <VmBox
                 v-if="up.kind === 'vm'"
                 :vm="up.vm"
+                :show-ip="showIp"
                 :x="up.x"
                 :y="up.y"
                 :ref="(el) => setRealVmRef(up.id, el)"
@@ -667,6 +710,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
             <VmBox
               v-if="node.kind === 'vm'"
               :vm="node.vm"
+              :show-ip="showIp"
               :x="node.x"
               :y="node.y"
               :ref="(el) => setRealVmRef(node.vm.id, el)"
@@ -732,7 +776,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
          down once that's done; it's not kept around as a
          permanently-hidden duplicate of the real map. -->
     <div v-if="!initialSizesReady" class="map-calibration-pool" aria-hidden="true">
-      <VmBox v-for="vm in allVms" :key="vm.id" :vm="vm" :ref="(el) => setCalibrationRef(vm.id, el)" />
+      <VmBox v-for="vm in allVms" :key="vm.id" :vm="vm" :show-ip="showIp" :ref="(el) => setCalibrationRef(vm.id, el)" />
       <ContainerNode
         v-for="c in allContainers"
         :key="c.id"
