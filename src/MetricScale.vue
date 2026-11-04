@@ -2,9 +2,11 @@
 // One reading placed on a 0–100 track, with the tiers that give it meaning
 // drawn underneath. Shared by the explainer modals; see metricScale.js for
 // the shaping that produces a row.
+// `row.unit`/`row.decimals` default to a percentage, which most readings
+// here are. A row with no `zones` is a reading with no scale to place it on
+// — a queue depth, say — and renders as the caption alone.
 defineProps({
   row: { type: Object, required: true },
-  decimals: { type: Number, default: 2 },
 })
 </script>
 
@@ -16,14 +18,17 @@ defineProps({
         class="metric-scale__value"
         :class="{ 'metric-scale__value--plain': row.chip.plain }"
         :style="row.chip.plain ? null : { color: row.chip.color, background: row.chip.background }"
-      >{{ row.value === null ? '—' : `${row.value.toFixed(decimals)}%` }}</span>
+      >{{ row.value === null ? '—' : `${row.value.toFixed(row.decimals ?? 2)}${row.unit ?? '%'}` }}</span>
     </p>
     <p class="metric-scale__note">{{ row.note }}</p>
+    <!-- For a reading that wants its own depiction rather than a track —
+         see the disk modal's queue. -->
+    <slot />
 
     <!-- Every bar is the same 0–100 scale, so a metric that normally sits
          near zero reads as the small number it is rather than being blown
          up to fill its own track. -->
-    <div class="metric-scale__track">
+    <div v-if="row.zones" class="metric-scale__track">
       <span
         v-if="row.value !== null"
         class="metric-scale__fill"
@@ -41,7 +46,7 @@ defineProps({
 
     <!-- The tiers on the same scale directly beneath: the fill says where
          this reading is, the strip says what that place means. -->
-    <div class="metric-scale__zones">
+    <div v-if="row.zones" class="metric-scale__zones">
       <span
         v-for="zone in row.zones"
         :key="zone.from"
@@ -53,7 +58,7 @@ defineProps({
         }"
       />
     </div>
-    <div class="metric-scale__marks">
+    <div v-if="row.zones" class="metric-scale__marks">
       <span
         v-for="mark in row.marks"
         :key="mark"

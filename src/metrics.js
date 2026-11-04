@@ -463,7 +463,7 @@ export async function fetchRamMetrics(ramMetrics, resourceId) {
   }
 }
 
-const PENDING_THRESHOLD = 1 // queued ops — above this, requests are actually backing up,
+export const PENDING_THRESHOLD = 1 // queued ops — above this, requests are actually backing up,
 // not just an occasional single-op blip (healthy VMs sit at 0 essentially always)
 
 // Absolute headroom, not a fill %, because the two say different things: a
@@ -471,7 +471,7 @@ const PENDING_THRESHOLD = 1 // queued ops — above this, requests are actually 
 // root disk is nearly out. What actually breaks things (a failed write, a
 // log that can't rotate, a package that can't unpack) is bytes remaining, so
 // that's what's alarmed on — fill % is shown for context but left uncolored.
-const LOW_SPACE_BYTES = 2 * 1024 ** 3 // 2 GiB
+export const LOW_SPACE_BYTES = 2 * 1024 ** 3 // 2 GiB
 
 // `diskMetrics` is whatever subset of disk-busy/disk-pending/disk-size/
 // disk-avail this resource actually has (from partitionMetricFamilies).
@@ -679,11 +679,21 @@ export const RAM_BUSY_TIERS = [
 // (not RAM's forgiving-until-the-cliff curve), so it shares CPU's
 // thresholds rather than RAM's — kept as its own tier list, not a shared
 // reference, so the two can be tuned independently later if warranted.
-const DISK_BUSY_TIERS = [
-  { max: 50, plain: true }, // healthy
-  { max: 75, color: '#854d0e', background: '#fef9c3' }, // yellow
-  { max: 90, color: '#9a3412', background: '#ffedd5' }, // orange
-  { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
+// Fill has no yellow step: a disk being mostly full is normal right up
+// until it isn't, so there's nothing useful to say between "fine" and
+// "getting close". Unlike the busy curves, the top of this one is about
+// headroom running out rather than the disk working hard.
+export const DISK_FILL_TIERS = [
+  { max: 90, plain: true, bar: '#cbd5e1' }, // normal
+  { max: 95, color: '#9a3412', background: '#ffedd5', bar: '#fb923c' }, // orange
+  { max: Infinity, color: '#b91c1c', background: '#fee2e2', bar: '#ef4444' }, // red
+]
+
+export const DISK_BUSY_TIERS = [
+  { max: 50, plain: true, bar: '#cbd5e1' }, // healthy
+  { max: 75, color: '#854d0e', background: '#fef9c3', bar: '#facc15' }, // yellow
+  { max: 90, color: '#9a3412', background: '#ffedd5', bar: '#fb923c' }, // orange
+  { max: Infinity, color: '#b91c1c', background: '#fee2e2', bar: '#ef4444' }, // red
 ]
 
 // Unverified first guess, not empirically tuned like the others — sessions
@@ -704,6 +714,14 @@ export function cpuBusyColor(busyPercent) {
 
 export function ramBusyColor(busyPercent) {
   return RAM_BUSY_TIERS.find((tier) => busyPercent < tier.max) ?? RAM_BUSY_TIERS.at(-1)
+}
+
+export function diskFillColor(fillPercent) {
+  return DISK_FILL_TIERS.find((tier) => fillPercent < tier.max) ?? DISK_FILL_TIERS.at(-1)
+}
+
+export function isDiskFillCritical(fillPercent) {
+  return diskFillColor(fillPercent) === DISK_FILL_TIERS.at(-1)
 }
 
 export function diskBusyColor(busyPercent) {

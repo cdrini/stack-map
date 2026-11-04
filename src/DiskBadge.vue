@@ -10,7 +10,15 @@
 // nothing and has room left).
 
 import { computed, watch } from 'vue'
-import { diskBusyColor, isDiskBusyCritical, fetchDiskMetrics, formatGiB, resolveMetricQuery } from './metrics.js'
+import {
+  diskBusyColor,
+  diskFillColor,
+  isDiskBusyCritical,
+  isDiskFillCritical,
+  fetchDiskMetrics,
+  formatGiB,
+  resolveMetricQuery,
+} from './metrics.js'
 import { useMetric } from './useMetric.js'
 import { openDiskExplainer } from './diskExplainer.js'
 
@@ -54,12 +62,25 @@ const fillTooltip = computed(() =>
     : `${formatGiB(usedBytes.value, 1)} GB / ${formatGiB(totalBytes.value, 1)} GB used — from node_exporter`
 )
 
+// Called from script scope, not inlined in the template: a template
+// unwraps `data` to its current value, and the modal wants the ref itself
+// so it keeps seeing this badge's refreshes while it's open.
+function explain() {
+  openDiskExplainer({ resourceId: props.resourceId, disk: props.disk, data })
+}
+
 const color = computed(() => (busy.value !== null ? diskBusyColor(busy.value) : null))
+const fillColor = computed(() => (fill.value !== null ? diskFillColor(fill.value) : null))
 // A disk running out of room renders in the same red as the top busy tier
 // (see the template's __chip--error), so it counts as critical too — and
 // it's the less recoverable of the two: a busy disk is slow, a full one
 // fails writes outright.
-const critical = computed(() => (busy.value !== null && isDiskBusyCritical(busy.value)) || availLow.value)
+const critical = computed(
+  () =>
+    (busy.value !== null && isDiskBusyCritical(busy.value)) ||
+    (fill.value !== null && isDiskFillCritical(fill.value)) ||
+    availLow.value
+)
 watch(critical, (val) => emit('critical-change', val), { immediate: true })
 
 // The call-out row below only exists while there's something in it, so this
@@ -82,8 +103,8 @@ watch(hasCallouts, (val) => emit('callouts-change', val), { immediate: true })
         ? `fetch failed: ${errorMessage}`
         : busyMetric && resolveMetricQuery(busyMetric, resourceId)) + ' — click for what these mean'
     "
-    @click="openDiskExplainer()"
-    @keydown.enter="openDiskExplainer()"
+    @click="explain()"
+    @keydown.enter="explain()"
   >
     <div class="disk-badge__row">
       <span class="disk-badge__label">{{ label }}</span>
@@ -92,10 +113,16 @@ watch(hasCallouts, (val) => emit('callouts-change', val), { immediate: true })
            disk with only one backend reporting (see fetchDiskMetrics) just
            shows that one rather than a gap or an error. -->
       <template v-else>
-        <!-- Uncolored: how full a disk is says nothing on its own about
-             whether that's a problem (a data disk sitting at 95% is doing
-             its job) — the remaining-space chip below is what alarms. -->
-        <span v-if="fill !== null" class="disk-badge__chip disk-badge__chip--plain" :title="fillTooltip">
+        <!-- Plain until it's nearly full: a disk whose job is holding data
+             is meant to sit high, so only the last stretch is worth colour
+             (see DISK_FILL_TIERS). -->
+        <span
+          v-if="fill !== null"
+          class="disk-badge__chip"
+          :class="{ 'disk-badge__chip--plain': fillColor.plain }"
+          :style="fillColor.plain ? null : { color: fillColor.color, background: fillColor.background }"
+          :title="fillTooltip"
+        >
           Fill {{ fill.toFixed(0) }}%
         </span>
 
