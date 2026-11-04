@@ -12,6 +12,7 @@ import {
   cpuBusyColor,
   cpuStealColor,
   isCpuBusyCritical,
+  isCpuStealCritical,
   cpuBusyMetric,
   fetchCpuMetrics,
   resolveMetricQuery,
@@ -51,7 +52,14 @@ const color = computed(() => (busy.value !== null ? cpuBusyColor(busy.value) : n
 // Steal is only ever drawn once it's past its first tier, so this is never
 // the plain one.
 const stealColor = computed(() => (steal.value !== null ? cpuStealColor(steal.value) : null))
-const critical = computed(() => busy.value !== null && isCpuBusyCritical(busy.value))
+// Either half of the family can put the box in its red state: a CPU pegged
+// at the top of its own curve, or steal high enough that the VM isn't
+// getting the CPU it asks for in the first place.
+const critical = computed(
+  () =>
+    (busy.value !== null && isCpuBusyCritical(busy.value)) ||
+    (steal.value !== null && isCpuStealCritical(steal.value))
+)
 // `immediate` reports the initial (non-critical) state right away, so the
 // parent VM box doesn't have to assume "not critical yet" on its own.
 watch(critical, (val) => emit('critical-change', val), { immediate: true })

@@ -40,6 +40,13 @@ const totalBytes = computed(() => data.value?.totalBytes ?? null)
 const swapPercent = computed(() => data.value?.swapPercent ?? null)
 const swapElevated = computed(() => data.value?.swapElevated ?? false)
 
+// Called from script scope, not inlined in the template: a template
+// unwraps `data` to its current value, and the modal wants the ref itself
+// so it keeps seeing this badge's refreshes while it's open.
+function explain() {
+  openRamExplainer({ resourceId: props.resourceId, data })
+}
+
 const color = computed(() => (busy.value !== null ? ramBusyColor(busy.value) : null))
 const critical = computed(() => busy.value !== null && isRamBusyCritical(busy.value))
 watch(critical, (val) => emit('critical-change', val), { immediate: true })
@@ -62,8 +69,8 @@ watch(swapElevated, (val) => emit('callouts-change', val), { immediate: true })
         ? `fetch failed: ${errorMessage}`
         : 'RAM: used+non-reclaimable slab / cached / total') + ' — click for what these mean'
     "
-    @click="openRamExplainer()"
-    @keydown.enter="openRamExplainer()"
+    @click="explain()"
+    @keydown.enter="explain()"
   >
     <span class="mem-badge__label">MEM:</span>
     <span v-if="status === 'loading'" class="mem-badge__chip mem-badge__chip--loading">…</span>

@@ -223,6 +223,9 @@ export async function fetchLatestMetric(metric, resourceId) {
 // family once and hand whatever's left to the generic per-metric badge.
 const CPU_METRIC_TYPES = new Set(['cpu-busy', 'cpu-idle', 'cpu-wait', 'cpu-steal'])
 const RAM_METRIC_TYPES = new Set([
+  'mem-total',
+  'mem-available',
+  'swap-total',
   'mem-used',
   'mem-free',
   'mem-cached',
@@ -366,64 +369,95 @@ export async function fetchCpuMetrics(cpuMetrics, resourceId) {
   }
 }
 
-const SWAP_THRESHOLD = 1 // % — collectd, unlike CPU, has no pre-aggregated memory %; any
+export const SWAP_THRESHOLD = 1 // % — collectd, unlike CPU, has no pre-aggregated memory %; any
 // meaningful swapping is worth flagging even at low percentages, since it
 // means real RAM pressure, not just "somewhat full"
 
 const RAM_RAW_TYPES = ['mem-used', 'mem-free', 'mem-cached', 'mem-buffered', 'mem-slab-recl', 'mem-slab-unrecl']
 
-// `ramMetrics` is whatever subset of the mem-*/swap-* family this resource
-// actually has (from partitionMetricFamilies) — all six mem-* types are
-// required (they're what total RAM and "used" are computed from); swap-*
-// is optional.
-export async function fetchRamMetrics(ramMetrics, resourceId) {
-  const byType = Object.fromEntries(ramMetrics.map((m) => [m.type, m]))
-  if (!RAM_RAW_TYPES.every((t) => byType[t])) {
+// Resolves a metric to its value, or null if it isn't configured or didn't
+// come back — the shape-detection below needs "do I have this" rather than
+// an exception.
+async function optionalValue(metric, resourceId) {
+  if (!metric) return null
+  try {
+    return (await fetchLatestMetric(metric, resourceId)).value
+  } catch {
+    return null
+  }
+}
+
+// The same three figures the badge shows, from whichever backend this
+// resource is wired to.
+//
+// node_exporter reports the parts separately, so `mem-available` is asked
+// for as free + cached + buffers + reclaimable slab rather than the kernel's
+// own MemAvailable. That's deliberate: MemAvailable discounts page cache the
+// kernel doubts it can reclaim, which reads several points busier, and the
+// bare-metal servers have no node_exporter and stay on collectd — measuring
+// the two differently would make them incomparable on the same map. Figured
+// this way the two agree to the byte.
+async function fetchRamTotals(byType, resourceId) {
+  if (byType['mem-total'] && byType['mem-available']) {
+    const [total, available, cached] = await Promise.all([
+      optionalValue(byType['mem-total'], resourceId),
+      optionalValue(byType['mem-available'], resourceId),
+      optionalValue(byType['mem-cached'], resourceId),
+    ])
+    if (total === null || available === null) throw new Error('memory metrics unavailable for this resource')
+    return { totalBytes: total, usedBytes: total - available, cachedBytes: cached }
+  }
+
+  if (!RAM_RAW_TYPES.every((type) => byType[type])) {
     throw new Error('memory metrics not fully configured for this resource')
   }
-
-  const [used, free, cached, buffered, slabRecl, slabUnrecl, swapUsed, swapFree] =
-    await Promise.allSettled([
-      ...RAM_RAW_TYPES.map((t) => fetchLatestMetric(byType[t], resourceId)),
-      byType['swap-used']
-        ? fetchLatestMetric(byType['swap-used'], resourceId)
-        : Promise.reject(new Error('swap-used not configured')),
-      byType['swap-free']
-        ? fetchLatestMetric(byType['swap-free'], resourceId)
-        : Promise.reject(new Error('swap-free not configured')),
-    ])
-
-  const memResults = [used, free, cached, buffered, slabRecl, slabUnrecl]
-  const failed = memResults.find((r) => r.status !== 'fulfilled')
-  if (failed) {
-    throw new Error(failed.reason instanceof Error ? failed.reason.message : String(failed.reason))
+  const parts = await Promise.all(RAM_RAW_TYPES.map((type) => optionalValue(byType[type], resourceId)))
+  if (parts.some((value) => value === null)) {
+    throw new Error('memory metrics unavailable for this resource')
   }
-
-  const [usedB, freeB, cachedB, bufferedB, slabReclB, slabUnreclB] = memResults.map(
-    (r) => r.value.value
-  )
+  const [used, free, cached, buffered, slabRecl, slabUnrecl] = parts
   // cached/buffered/slab-recl are reclaimable — Linux hands them back
   // instantly under pressure, so they're excluded from "used" or every
   // healthy box would read as constantly ~90%+ full.
-  const total = usedB + freeB + cachedB + bufferedB + slabReclB + slabUnreclB
-  const busy = ((usedB + slabUnreclB) / total) * 100
-
-  let swapPercent = null
-  if (swapUsed.status === 'fulfilled' && swapFree.status === 'fulfilled') {
-    const swapTotal = swapUsed.value.value + swapFree.value.value
-    swapPercent = swapTotal > 0 ? (swapUsed.value.value / swapTotal) * 100 : 0
+  return {
+    totalBytes: used + free + cached + buffered + slabRecl + slabUnrecl,
+    usedBytes: used + slabUnrecl,
+    cachedBytes: cached,
   }
+}
+
+// Swap the same way: a total and a free from node_exporter, a used and a
+// free from collectd.
+async function fetchSwapPercent(byType, resourceId) {
+  const free = await optionalValue(byType['swap-free'], resourceId)
+  if (free === null) return null
+  const total = byType['swap-total']
+    ? await optionalValue(byType['swap-total'], resourceId)
+    : await optionalValue(byType['swap-used'], resourceId).then((used) => (used === null ? null : used + free))
+  if (total === null) return null
+  return total > 0 ? ((total - free) / total) * 100 : 0
+}
+
+// `ramMetrics` is whatever subset of the mem-*/swap-* family this resource
+// actually has (from partitionMetricFamilies). Two shapes are accepted, one
+// per backend — see fetchRamTotals. swap-* is optional in both.
+export async function fetchRamMetrics(ramMetrics, resourceId) {
+  const byType = Object.fromEntries(ramMetrics.map((m) => [m.type, m]))
+  const [totals, swapPercent] = await Promise.all([
+    fetchRamTotals(byType, resourceId),
+    fetchSwapPercent(byType, resourceId),
+  ])
 
   return {
-    busy,
-    usedBytes: usedB + slabUnreclB,
+    busy: (totals.usedBytes / totals.totalBytes) * 100,
+    usedBytes: totals.usedBytes,
     // Reclaimable (Linux hands it back instantly under pressure, hence
     // excluded from `used`/`busy` above), but still worth showing
     // separately — "free" alone undercounts how much RAM is actually
     // available in practice, since most of a healthy box's page cache
     // shows up here rather than as truly idle memory.
-    cachedBytes: cachedB,
-    totalBytes: total,
+    cachedBytes: totals.cachedBytes,
+    totalBytes: totals.totalBytes,
     swapPercent,
     swapElevated: swapPercent !== null && swapPercent > SWAP_THRESHOLD,
   }
@@ -630,11 +664,15 @@ export const CPU_BUSY_TIERS = [
   { max: Infinity, color: '#b91c1c', background: '#fee2e2', bar: '#ef4444' }, // red
 ]
 
-const RAM_BUSY_TIERS = [
-  { max: 80, plain: true }, // healthy
-  { max: 90, color: '#854d0e', background: '#fef9c3' }, // yellow
-  { max: 95, color: '#9a3412', background: '#ffedd5' }, // orange
-  { max: Infinity, color: '#b91c1c', background: '#fee2e2' }, // red
+export const RAM_BUSY_TIERS = [
+  // Healthy reads as this app's own muted blue rather than slate, so that
+  // in the memory modal — where the bar also carries a second segment for
+  // page cache — the measured share is the one with the colour and the
+  // borrowed share is the quiet grey beside it.
+  { max: 80, plain: true, bar: '#7d9db8' }, // healthy
+  { max: 90, color: '#854d0e', background: '#fef9c3', bar: '#facc15' }, // yellow
+  { max: 95, color: '#9a3412', background: '#ffedd5', bar: '#fb923c' }, // orange
+  { max: Infinity, color: '#b91c1c', background: '#fee2e2', bar: '#ef4444' }, // red
 ]
 
 // Disk saturation causes immediate queueing/latency, same shape as CPU
@@ -684,6 +722,13 @@ export function haproxySessionsColor(busyPercent) {
 // to color the individual chip.
 export function isCpuBusyCritical(busyPercent) {
   return cpuBusyColor(busyPercent) === CPU_BUSY_TIERS.at(-1)
+}
+
+// Steal's top tier counts the same way: past it, this VM is being starved
+// badly enough that its other readings stop describing anything it can
+// actually do, which is worth flagging on the box as much as a pegged CPU.
+export function isCpuStealCritical(stealPercent) {
+  return cpuStealColor(stealPercent) === CPU_STEAL_TIERS.at(-1)
 }
 
 export function isRamBusyCritical(busyPercent) {

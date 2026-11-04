@@ -1,94 +1,97 @@
 <script setup>
+import { computed } from 'vue'
 import UModal from '@nuxt/ui/components/Modal.vue'
-import { ramExplainerOpen, closeRamExplainer } from './ramExplainer.js'
+import { ramExplainerOpen, ramExplainerContext, closeRamExplainer } from './ramExplainer.js'
+import { RAM_BUSY_TIERS, SWAP_THRESHOLD, formatGiB } from './metrics.js'
+import { tieredRow, thresholdRow } from './metricScale.js'
+import MetricScale from './MetricScale.vue'
+
+const reading = computed(() => ramExplainerContext.value?.data?.value ?? null)
+
+// Page cache as its own share of the same bar rather than folded into the
+// figure above — the whole point is that it ISN'T used memory, it's memory
+// the kernel is borrowing until something wants it back. Hence the quieter
+// grey: it's the larger segment nearly always, and it shouldn't out-shout
+// the reading the modal is actually about (see RAM_BUSY_TIERS' healthy bar).
+const CACHE_COLOUR = '#cbd5e1'
+
+const usedRow = computed(() => {
+  const r = reading.value
+  const cachedPercent = r && r.totalBytes ? (r.cachedBytes / r.totalBytes) * 100 : null
+  return {
+    ...tieredRow(
+      'Used',
+      r?.busy ?? null,
+      RAM_BUSY_TIERS,
+      'Memory in use, not counting cache Linux hands back the moment anything needs it.'
+    ),
+    extra: cachedPercent === null ? null : { value: cachedPercent, background: CACHE_COLOUR },
+  }
+})
+
+const swapRow = computed(() =>
+  thresholdRow(
+    'swap',
+    reading.value?.swapPercent ?? null,
+    SWAP_THRESHOLD,
+    'Swapping at all means real memory pressure, not just a box that looks full.'
+  )
+)
+
+const title = computed(() =>
+  ramExplainerContext.value ? `Memory · ${ramExplainerContext.value.resourceId}` : 'Memory metrics'
+)
 </script>
 
 <template>
-  <UModal :open="ramExplainerOpen" title="RAM metrics" @update:open="(v) => !v && closeRamExplainer()">
+  <UModal :open="ramExplainerOpen" :title="title" @update:open="(v) => !v && closeRamExplainer()">
     <template #body>
-      <dl class="ram-explainer__list">
-        <dt><span class="ram-explainer__chip ram-explainer__chip--used">used</span></dt>
-        <dd>
-          collectd's <code>memory.used</code> plus non-reclaimable slab — kernel/application memory that
-          isn't coming back without something actually freeing it. This is what the badge's busy % and
-          color (green under 50%, yellow 50&ndash;75%, orange 75&ndash;90%, red above that) are based on.
-        </dd>
-
-        <dt><span class="ram-explainer__chip ram-explainer__chip--cached">cached</span></dt>
-        <dd>
-          <code>memory.cached</code> — mostly the page cache (recently-read files, etc). Reclaimable: Linux
-          hands it back instantly under real memory pressure, so it's excluded from "used"/busy% above.
-          Shown separately because "free" alone undercounts how much RAM a healthy box actually has
-          available in practice — most of it usually shows up here instead.
-        </dd>
-
-        <dt><span class="ram-explainer__chip ram-explainer__chip--total">total</span></dt>
-        <dd>
-          used + cached + free + buffered + reclaimable slab — the VM or server's full physical RAM.
-        </dd>
-
-        <dt><span class="ram-explainer__chip ram-explainer__chip--warn">swap</span></dt>
-        <dd>
-          Percent of swap space in use — only shown when non-negligible (above 1%), since any real swapping
-          at all means this VM is genuinely out of RAM, not just "somewhat full."
-        </dd>
-      </dl>
+      <MetricScale :row="usedRow" />
+      <!-- Directly under the bar it describes: these are the figures those
+           segments are, and the dots say which is which. -->
+      <p v-if="reading && reading.totalBytes" class="ram-explainer__breakdown">
+        <span class="ram-explainer__dot" :style="{ background: usedRow.fill }" />{{ formatGiB(reading.usedBytes, 2) }} GB used
+        <span class="ram-explainer__sep">·</span>
+        <span class="ram-explainer__dot" :style="{ background: CACHE_COLOUR }" />{{ formatGiB(reading.cachedBytes, 2) }} GB cached
+        <span class="ram-explainer__sep">·</span>
+        {{ formatGiB(reading.totalBytes, 2) }} GB total
+      </p>
+      <MetricScale :row="swapRow" />
+      <p class="ram-explainer__source">
+        VMs: node_exporter. Servers: collectd. Cache, buffers and reclaimable slab count as available
+        on both, so the two read the same way.
+      </p>
     </template>
   </UModal>
 </template>
 
 <style scoped>
-.ram-explainer__list {
-  margin: 0;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.6rem 0.8rem;
-}
-
-.ram-explainer__list dt {
-  padding-top: 0.1rem;
-}
-
-.ram-explainer__list dd {
-  margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.5;
+/* The same three figures the badge shows, with the two coloured ones keyed
+   to their segment in the bar above. */
+.ram-explainer__breakdown {
+  margin: 0.5rem 0 1.3rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
   color: #334155;
 }
 
-.ram-explainer__list code {
-  font-size: 0.8em;
-  background: #f1f5f9;
-  padding: 0.1em 0.3em;
-  border-radius: 4px;
-}
-
-.ram-explainer__chip {
+.ram-explainer__dot {
   display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 0.3rem;
+  border-radius: 999px;
+  vertical-align: baseline;
+}
+
+.ram-explainer__sep {
+  margin: 0 0.15rem;
+  color: #cbd5e1;
+}
+
+.ram-explainer__source {
+  margin: 1.2rem 0 0;
   font-size: 0.7rem;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.ram-explainer__chip--used {
-  color: #15803d;
-  background: #dcfce7;
-}
-
-.ram-explainer__chip--cached {
-  color: #1d4ed8;
-  background: #dbeafe;
-}
-
-.ram-explainer__chip--total {
-  color: #334155;
-  background: #e2e8f0;
-}
-
-.ram-explainer__chip--warn {
-  color: #9a3412;
-  background: #ffedd5;
+  color: #94a3b8;
 }
 </style>
