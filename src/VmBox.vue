@@ -219,6 +219,9 @@ defineExpose({ measure })
       </span>
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
+    <div v-if="vm.ip" class="map-vm__ip">{{ vm.ip }}</div>
+
+    <div class="map-vm__divider"></div>
 
     <div v-if="hasMetrics" class="map-vm__metrics">
       <div v-if="cpuMetrics.length" class="map-vm__metrics-row">
@@ -434,6 +437,16 @@ defineExpose({ measure })
   gap: 3px;
   min-height: 14px;
   overflow: hidden;
+}
+
+/* Sits with the name rather than among the metric rows below: it identifies
+   the box instead of reporting on it, so it needs no label of its own. Same
+   treatment as a standalone container's host line (ContainerNode.vue). */
+.map-vm__ip {
+  font-size: 0.58rem;
+  color: #94a3b8;
+  margin: -2px 0 2px;
+  white-space: nowrap;
 }
 
 .map-vm__divider {
