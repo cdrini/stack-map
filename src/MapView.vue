@@ -23,6 +23,7 @@ import {
 } from './mapLayout.js'
 import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
+import { basePrefix } from './apiBase.js'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
@@ -45,9 +46,11 @@ const hoverDimEnabled = ref(true)
 const showIp = ref(false)
 
 // The overflow menu behind the toolbar's "…" — settings that are worth
-// having but not worth the width of a permanent checkbox. `onSelect`
-// swallows the default close, so several can be toggled in one visit.
-const viewOptions = computed(() =>
+// having but not worth the width of a permanent checkbox, and the one-off
+// actions that go with them. The toggles' `onSelect` swallows the default
+// close so several can be set in one visit; the action below is its own
+// group, and does close on use.
+const viewOptions = computed(() => [
   [
     { label: 'Dim unrelated on hover', model: hoverDimEnabled },
     { label: 'Show IP', model: showIp },
@@ -59,8 +62,18 @@ const viewOptions = computed(() =>
       model.value = checked
     },
     onSelect: (e) => e.preventDefault(),
-  }))
-)
+  })),
+  [
+    {
+      // The served spec, exactly as it sits on disk — /api/spec reads the
+      // file and nothing else (see server/main.py), so this is the source
+      // of everything on the map rather than a rendering of it.
+      label: 'View stack.yaml',
+      icon: 'i-lucide-file-code-2',
+      onSelect: () => window.open(`${basePrefix}/api/spec`, '_blank', 'noopener'),
+    },
+  ],
+])
 
 // "queries" edges (every container hitting a database/cache/backend) are
 // the vast majority of edges on this map and mostly just add visual
