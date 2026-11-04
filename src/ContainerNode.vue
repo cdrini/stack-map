@@ -153,6 +153,7 @@ defineExpose({ measure })
 <style scoped>
 .map-container-node {
   position: absolute;
+  cursor: auto;
   width: 164px;
   display: flex;
   flex-direction: column;

@@ -3,7 +3,12 @@ import { reactive, ref } from 'vue'
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
 
-export function usePanZoom(initial) {
+// `noDragFrom` is a selector for surfaces a drag should NOT pan from, so the
+// browser can do what it would normally do there — selecting text. Only
+// honoured for a mouse: touch has no drag-to-select, and on a map that's
+// mostly cards, swallowing those drags would leave a touch user with no way
+// to pan at all.
+export function usePanZoom(initial, { noDragFrom = null } = {}) {
   const view = reactive({ ...initial })
   // A ref (not a plain closure variable) so the template can react to
   // it directly — see MapView.vue's use of it to suspend text selection
@@ -70,6 +75,22 @@ export function usePanZoom(initial) {
   }
 
   function onPointerDown(e) {
+    // Left unregistered, so onPointerMove ignores it too and the drag is the
+    // browser's to interpret — see noDragFrom.
+    if (noDragFrom && e.pointerType === 'mouse' && e.target.closest?.(noDragFrom)) return
+
+    // Pressing here is the "click away" that should drop any existing
+    // selection. The browser would do that by itself, but `dragging` below
+    // is set on the press rather than on the first move, and it carries
+    // `user-select: none` (see MapView's .map-viewport--panning) — which,
+    // applied at the moment of the press, suppresses the collapse. The
+    // alternative, arming on press and only setting `dragging` once the
+    // pointer actually moves, hands a pan's first move back to the browser
+    // as the start of a text selection, which is what that rule exists to
+    // prevent. So the collapse is done by hand instead. Primary button
+    // only, so a right-click still leaves text selected to be copied.
+    if (e.button === 0) window.getSelection()?.removeAllRanges()
+
     // No pointer capture here — see onPointerMove, which captures lazily
     // on the first actual move instead.
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })

@@ -31,6 +31,7 @@ const emit = defineEmits(['hover-container'])
 <style scoped>
 .map-external {
   position: absolute;
+  cursor: auto;
   display: flex;
   flex-direction: column;
   align-items: center;

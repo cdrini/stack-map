@@ -333,6 +333,7 @@ defineExpose({ measure })
 <style scoped>
 .map-vm {
   position: absolute;
+  cursor: auto;
   width: 164px;
   background: #fff;
   border: 1px solid #cbd5e1;

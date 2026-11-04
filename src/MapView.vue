@@ -404,11 +404,17 @@ const attachedContainerIds = computed(() => {
 })
 
 const viewportEl = ref(null)
-const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset } = usePanZoom({
-  x: 24,
-  y: 24,
-  scale: 0.85,
-})
+const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoomBy, reset } = usePanZoom(
+  {
+    x: 24,
+    y: 24,
+    scale: 0.85,
+  },
+  // The cards carry everything on the map worth copying — a hostname, an IP,
+  // a metric figure — so a mouse drag across one selects text instead of
+  // panning. Panning stays on the background, the wheel, and the toolbar.
+  { noDragFrom: '.map-vm, .map-container-node, .map-external, .map-server__label' }
+)
 </script>
 
 <template>
@@ -915,15 +921,13 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
   scroll-axis-lock: none;
 }
 
-.map-viewport:active {
-  cursor: grabbing;
-}
 
 /* A click-drag pan otherwise reads to the browser as a text-selection
    drag — this suspends selection only for the duration of an actual drag
    (see usePanZoom.js's `dragging`), rather than disabling it on the map
    wholesale, so text is still normally selectable. */
 .map-viewport--panning {
+  cursor: grabbing;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -983,6 +987,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
 }
 
 .map-server__label {
+  cursor: auto;
   position: absolute;
   top: 8px;
   left: 12px;
