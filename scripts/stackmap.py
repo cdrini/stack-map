@@ -44,8 +44,28 @@ BLOCK_OPEN_RE = re.compile(r"^    (?P<key>[A-Za-z_][\w-]*):\s*$")
 SECTION_RE = re.compile(r"^(?P<name>[A-Za-z_][\w-]*):\s*$")
 
 
+# The spec is UTF-8 — em dashes, arrows, an emoji — and Windows would
+# otherwise decode it as cp1252 and fail. `newline=""` keeps whatever line
+# endings the file has instead of translating them on the way in or out,
+# so a CRLF checkout doesn't come back rewritten end to end.
 def read_spec(path: Path) -> list[str]:
-    return path.read_text().splitlines(keepends=True)
+    with path.open(encoding="utf-8", newline="") as f:
+        return f.read().splitlines(keepends=True)
+
+
+def write_spec(path: Path, lines: list[str]) -> None:
+    with path.open("w", encoding="utf-8", newline="") as f:
+        f.write("".join(lines))
+
+
+def line_ending(lines: list[str]) -> str:
+    """Whatever this file already uses, so an inserted line matches."""
+    for line in lines:
+        if line.endswith("\r\n"):
+            return "\r\n"
+        if line.endswith("\n"):
+            return "\n"
+    return "\n"
 
 
 def section_bounds(lines: list[str], name: str) -> tuple[int, int]:
@@ -129,10 +149,11 @@ def set_fields(lines: list[str], entity_id: str, updates: dict[str, str]) -> tup
     start, end = entity_bounds(lines, entity_id)
     out = list(lines)
     changes = []
+    ending = line_ending(lines)
 
     for key, value in updates.items():
         start, end = entity_bounds(out, entity_id)  # bounds shift as we insert
-        line = f"    {key}: {quote(value)}\n"
+        line = f"    {key}: {quote(value)}{ending}"
         existing = None
         # Where a new field goes: after the last scalar, but ahead of any
         # nested block, so `relationships:` and friends stay at the bottom
@@ -221,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             print(f"{args.id}: would set {', '.join(changes)}")
             return 0
-        args.spec.write_text("".join(out))
+        write_spec(args.spec, out)
         print(f"{args.id}: {', '.join(changes)}")
         return 0
     except KeyError as e:
