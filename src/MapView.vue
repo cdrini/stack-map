@@ -25,6 +25,7 @@ import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
 import { basePrefix } from './apiBase.js'
 import { osLabels } from './osInfo.js'
+import { persistedRef } from './persistedRef.js'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
@@ -42,10 +43,12 @@ import RewindTimeline from './RewindTimeline.vue'
 // just local state like everything else here.
 const hoverDimEnabled = ref(true)
 
-// Off by default: an address is reference material you go looking for, not
-// something worth a row on every box all the time.
-const showIp = ref(false)
-const showOs = ref(false)
+// Off by default: an address or a release name is reference material you go
+// looking for, not something worth a row on every box all the time. Both
+// are remembered though — someone who wants them generally wants them every
+// visit, and re-finding the menu each time is a poor reward for that.
+const showIp = persistedRef('showIp', false)
+const showOs = persistedRef('showOs', false)
 
 // The overflow menu behind the toolbar's "…" — settings that are worth
 // having but not worth the width of a permanent checkbox, and the one-off
