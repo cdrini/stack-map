@@ -17,7 +17,9 @@ VMs, metric types, or the templating at all.
 """
 
 import asyncio
+import json
 import logging
+import os
 import re
 import time
 from contextlib import asynccontextmanager
@@ -168,10 +170,20 @@ compose_cache = ComposeCache()
 # third party itself — the same arrangement ComposeCache has with GitHub,
 # for the same reasons.
 EOL_API = "https://endoflife.date/api/v1/products"
+# A snapshot baked into the image at build time (see the Dockerfile and
+# scripts/fetch-os-releases.py). The production hosts have no outbound
+# network at all, so this — not the API — is what actually answers there;
+# the fetch above is for development, and for any deployment that can reach
+# out. Absent in a source checkout, which simply means no fallback.
+EOL_SNAPSHOT_PATH = Path(os.environ.get("STACKMAP_OS_RELEASES_PATH", Path(__file__).parent / "os-releases.json"))
 # Release dates move when a distro ships a point release or revises an EOL;
 # neither is news within a day.
 EOL_TTL_SECONDS = 24 * 3600
 EOL_RETRY_SECONDS = 600
+# Much longer once a snapshot is standing in: a host that can't reach the
+# internet won't be able to in ten minutes either, and every retry costs a
+# request the full connect timeout.
+EOL_OFFLINE_RETRY_SECONDS = 6 * 3600
 # A product name goes into a URL path, and it arrives from the client (it's
 # whatever `os` the spec records). Anything outside this charset is refused
 # rather than escaped, since no real product name needs more.
@@ -187,6 +199,17 @@ class EolCache:
         self._releases: dict[str, list[dict]] = {}
         self._valid_until: dict[str, float] = {}
         self._lock = asyncio.Lock()
+        self._snapshot = self._read_snapshot()
+
+    @staticmethod
+    def _read_snapshot() -> dict[str, list[dict]]:
+        try:
+            return json.loads(EOL_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            log.warning("could not read %s: %s", EOL_SNAPSHOT_PATH, e)
+            return {}
 
     async def get(self, product: str) -> list[dict] | None:
         """That product's releases, or None if they've never been fetched."""
@@ -206,11 +229,19 @@ class EolCache:
                 self._valid_until[product] = time.monotonic() + EOL_TTL_SECONDS
             except Exception as e:
                 # An unknown product 404s here, which is indistinguishable
-                # from a transient failure and treated the same: nothing to
-                # show, asked again later.
-                self._valid_until[product] = time.monotonic() + EOL_RETRY_SECONDS
-                log.warning("end-of-life lookup failed for %s: %s", product, e)
-        return self._releases.get(product)
+                # from a transient failure and treated the same: fall back to
+                # the baked snapshot and ask again later.
+                offline = product in self._snapshot
+                self._valid_until[product] = time.monotonic() + (
+                    EOL_OFFLINE_RETRY_SECONDS if offline else EOL_RETRY_SECONDS
+                )
+                log.warning(
+                    "end-of-life lookup failed for %s (%s): %s",
+                    product,
+                    "serving the baked snapshot" if offline else "no snapshot to fall back on",
+                    e,
+                )
+        return self._releases.get(product) or self._snapshot.get(product)
 
 
 eol_cache = EolCache()

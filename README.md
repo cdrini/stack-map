@@ -100,6 +100,27 @@ Leave it out and the VM ids are used as hostnames directly;
 `STACKMAP_DOMAIN` overrides it either way, alongside `STACKMAP_SSH_USER`,
 `SSH_OPTS` and `STACKMAP_SPEC_PATH`.
 
+## OS release dates
+
+A VM's box and info modal show what it's running and whether that release is
+still supported, from endoflife.date. The production hosts have no outbound
+network, so the dataset is **baked into the image at build time** rather than
+fetched at runtime: the Dockerfile's `eol-builder` stage runs
+`scripts/fetch-os-releases.py` and the result is served by `/api/os-releases`.
+Only the machine doing the build needs internet, and refreshing the dates
+means rebuilding.
+
+`EOL_PRODUCTS` is a build arg, so a fleet that grows a distro needs no code
+change:
+
+```sh
+docker build --build-arg EOL_PRODUCTS="debian ubuntu alpine" .
+```
+
+A deployment that *can* reach out fetches live and caches for a day, falling
+back to the baked copy when it can't — so development and production behave
+the same way without being configured differently.
+
 ## Keeping `definition:` anchors current
 
 A container's `definition:` links to the exact lines defining its service in

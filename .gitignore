@@ -31,6 +31,10 @@ CLAUDE.local.md
 # than 8000 when something else in the sandbox already holds it.
 vite.config.local.*
 
+# Baked into the image at build time by scripts/fetch-os-releases.py, so
+# it's derived data rather than source — see the Dockerfile.
+server/os-releases.json
+
 # Python (server/)
 .venv
 __pycache__

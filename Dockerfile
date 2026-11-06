@@ -29,11 +29,24 @@ WORKDIR /app
 COPY server/pyproject.toml server/uv.lock ./
 RUN uv sync --frozen
 
+# ---- Bake the OS release dates in ----
+# The production hosts have no outbound network, so the end-of-life dataset
+# travels with the image instead of being fetched at runtime (see EolCache
+# in server/main.py, which falls back to this file). Only the build needs
+# internet. Add distros here as the fleet grows — an unreachable one is
+# skipped rather than failing the build, but fetching none at all fails.
+FROM python:3.14-alpine AS eol-builder
+ARG EOL_PRODUCTS="debian ubuntu almalinux rocky-linux rhel fedora centos"
+WORKDIR /app
+COPY scripts/fetch-os-releases.py ./
+RUN python fetch-os-releases.py --out os-releases.json $EOL_PRODUCTS
+
 # ---- API server, also serving the built frontend ----
 FROM python:3.14-alpine AS runtime
 WORKDIR /app
 COPY --from=deps-builder /app/.venv ./.venv
 COPY server/env.py server/main.py server/compose_refs.py ./
+COPY --from=eol-builder /app/os-releases.json ./
 COPY --from=frontend-builder /app/dist ./static
 
 ENV PATH="/app/.venv/bin:$PATH"
