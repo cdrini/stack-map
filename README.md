@@ -81,6 +81,13 @@ reason `compose_refs.py` rewrites anchors line by line. Values that YAML
 would read back as something else are quoted, so an `osVersion` of `22.10`
 stays a string instead of becoming the float `22.1`.
 
+What the scripts record is a fallback, not the source of truth: where
+node_exporter is running, the map reads the OS from its `node_os_info`
+metric instead, which is live and more detailed (`Ubuntu 22.04.5 LTS` rather
+than `ubuntu 22.04`). The recorded `os`/`osVersion` cover the bare-metal
+servers, which run no exporter, and any stretch where Prometheus is
+unreachable.
+
 `collect-os.sh` resolves each VM to a hostname using the spec's own
 `config:` block, so no domain is baked into the repo:
 

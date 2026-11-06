@@ -245,6 +245,16 @@ const HAPROXY_METRIC_TYPES = new Set([
 ])
 const SOLR_METRIC_TYPES = new Set(['solr-request-rate', 'solr-error-rate', 'solr-timeout-rate'])
 
+// Metrics that exist to be read, not displayed — their value is a constant
+// and the content is in their labels (node_os_info). They're kept out of
+// every family so no badge tries to render one; whoever wants them asks for
+// them by type (see VmInfoModal).
+const INFO_METRIC_TYPES = new Set(['os-info'])
+
+export function infoMetric(metrics, type) {
+  return metrics.find((m) => m.type === type)
+}
+
 export function partitionMetricFamilies(metrics) {
   const cpuMetrics = metrics.filter((m) => CPU_METRIC_TYPES.has(m.type))
   const ramMetrics = metrics.filter((m) => RAM_METRIC_TYPES.has(m.type))
@@ -257,7 +267,8 @@ export function partitionMetricFamilies(metrics) {
       !RAM_METRIC_TYPES.has(m.type) &&
       !DISK_METRIC_TYPES.has(m.type) &&
       !HAPROXY_METRIC_TYPES.has(m.type) &&
-      !SOLR_METRIC_TYPES.has(m.type)
+      !SOLR_METRIC_TYPES.has(m.type) &&
+      !INFO_METRIC_TYPES.has(m.type)
   )
   return { cpuMetrics, ramMetrics, diskMetrics, haproxyMetrics, solrMetrics, otherMetrics }
 }

@@ -16,6 +16,9 @@ export async function loadSpec() {
   spec.externals ??= []
   spec.metrics ??= []
   spec.links ??= []
+  // Settings the helper scripts read (see scripts/collect-os.sh); the only
+  // one the map itself uses is `domain`, to show a VM's full hostname.
+  spec.config ??= {}
 }
 
 // Fresher `definition:` anchors than the ones the spec file itself carries,

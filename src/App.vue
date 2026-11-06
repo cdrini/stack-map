@@ -4,6 +4,7 @@ import MapView from './MapView.vue'
 import CpuExplainerModal from './CpuExplainerModal.vue'
 import DiskExplainerModal from './DiskExplainerModal.vue'
 import RamExplainerModal from './RamExplainerModal.vue'
+import VmInfoModal from './VmInfoModal.vue'
 </script>
 
 <template>
@@ -12,5 +13,6 @@ import RamExplainerModal from './RamExplainerModal.vue'
     <CpuExplainerModal />
     <DiskExplainerModal />
     <RamExplainerModal />
+    <VmInfoModal />
   </UApp>
 </template>

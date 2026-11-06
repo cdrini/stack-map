@@ -296,7 +296,17 @@ async def _fetch_prometheus_one(client: httpx.AsyncClient, base: str, query: str
     latest = window[-1] if window else None
     if not latest:
         return query, None
-    return query, {"value": latest["value"], "timestamp": latest["timestamp"], "window": window}
+    # Prometheus "info" metrics carry their payload in labels and leave the
+    # value as a constant 1 — node_os_info is the whole OS release in label
+    # form. Passing them through costs little and is the only way the
+    # frontend can read one.
+    labels = {k: v for k, v in series[0].get("metric", {}).items() if k != "__name__"}
+    return query, {
+        "value": latest["value"],
+        "timestamp": latest["timestamp"],
+        "window": window,
+        "labels": labels,
+    }
 
 
 async def _fetch_prometheus(source: str, query: list[str]):

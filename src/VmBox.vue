@@ -9,6 +9,7 @@ import {
   groupSolrMetricsByHandler,
 } from './metrics.js'
 import { stackMenuItems } from './stackMenu.js'
+import { openVmInfo } from './vmInfo.js'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
@@ -211,7 +212,25 @@ defineExpose({ measure })
     :style="{ left: x + 'px', top: y + 'px' }"
   >
     <div class="map-vm__header">
-      <span class="map-vm__name">{{ vm.replicaSetName ?? vm.id }}</span>
+      <span class="map-vm__name" role="button" tabindex="0" @click="openVmInfo(vm)" @keydown.enter="openVmInfo(vm)">
+        {{ vm.replicaSetName ?? vm.id }}
+      </span>
+      <!-- The name is clickable too, but nothing about a name says so —
+           this is the affordance. Inline rather than @nuxt/ui's UIcon,
+           which pulls in a Nuxt-only runtime this build can't resolve. -->
+      <svg
+        class="map-vm__info"
+        viewBox="0 0 16 16"
+        role="button"
+        tabindex="0"
+        :aria-label="`About ${vm.id}`"
+        @click="openVmInfo(vm)"
+        @keydown.enter="openVmInfo(vm)"
+      >
+        <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <circle cx="8" cy="4.6" r="0.95" fill="currentColor" />
+        <path d="M8 7.2v4.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </svg>
       <span
         v-if="vm.replicaSetSize"
         class="map-vm__replicas"
@@ -405,6 +424,26 @@ defineExpose({ measure })
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* Quiet until the box is hovered: eighteen of these on screen at once
+   shouldn't read as eighteen things demanding to be clicked. */
+.map-vm__info {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.map-vm:hover .map-vm__info {
+  color: #94a3b8;
+}
+
+.map-vm__info:hover {
+  color: #475569;
 }
 
 .map-vm__replicas {
