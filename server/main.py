@@ -211,13 +211,24 @@ class EolCache:
             log.warning("could not read %s: %s", EOL_SNAPSHOT_PATH, e)
             return {}
 
+    def _answer(self, product: str) -> list[dict] | None:
+        """Live data where we have it, the baked snapshot otherwise.
+
+        Every return path goes through here. When the fallback lived only on
+        the path that actually attempts a fetch, the first request after a
+        restart was answered and every one after it — for as long as the
+        retry window — came back empty, which is the opposite of what a
+        cache is for.
+        """
+        return self._releases.get(product) or self._snapshot.get(product)
+
     async def get(self, product: str) -> list[dict] | None:
-        """That product's releases, or None if they've never been fetched."""
+        """That product's releases, or None if nothing knows any."""
         if time.monotonic() < self._valid_until.get(product, 0):
-            return self._releases.get(product)
+            return self._answer(product)
         async with self._lock:
             if time.monotonic() < self._valid_until.get(product, 0):
-                return self._releases.get(product)
+                return self._answer(product)
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     response = await client.get(f"{EOL_API}/{product}/")
@@ -241,7 +252,7 @@ class EolCache:
                     "serving the baked snapshot" if offline else "no snapshot to fall back on",
                     e,
                 )
-        return self._releases.get(product) or self._snapshot.get(product)
+        return self._answer(product)
 
 
 eol_cache = EolCache()
