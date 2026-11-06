@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { metricsFor } from './spec.js'
 import { appFor } from './apps.js'
 import {
@@ -10,6 +10,7 @@ import {
 } from './metrics.js'
 import { stackMenuItems } from './stackMenu.js'
 import { openVmInfo } from './vmInfo.js'
+import { osLabel, loadOs } from './osInfo.js'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
@@ -28,6 +29,7 @@ const props = defineProps({
   attachedContainerIds: { type: Set, default: null },
   // Behind the toolbar's overflow menu, off by default — see MapView.vue.
   showIp: { type: Boolean, default: false },
+  showOs: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['recheck-size', 'hover-container'])
@@ -122,6 +124,11 @@ const hasCriticalMetric = computed(() => criticalStatuses.value.size > 0)
 // all, which is equally unrelated. `every` is vacuously true for an empty
 // list, so that case falls out for free. Short-circuits to a falsy null
 // (not true) when nothing's hovered, since attachedContainerIds is null then.
+// Only asked for when the line is actually shown — see osInfo.js, which
+// keeps the answer rather than re-fetching it on every refresh.
+const os = computed(() => osLabel(props.vm))
+watch(() => props.showOs, (on) => on && loadOs(props.vm), { immediate: true })
+
 const allContainersDimmed = computed(
   () => props.attachedContainerIds && props.vm.containers.every((c) => !props.attachedContainerIds.has(c.id))
 )
@@ -240,10 +247,9 @@ defineExpose({ measure })
       </span>
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
-    <template v-if="showIp && vm.ip">
-      <div class="map-vm__ip">{{ vm.ip }}</div>
-      <div class="map-vm__divider"></div>
-    </template>
+    <div v-if="showIp && vm.ip" class="map-vm__sub">{{ vm.ip }}</div>
+    <div v-if="showOs && os" class="map-vm__sub">{{ os }}</div>
+    <div v-if="(showIp && vm.ip) || (showOs && os)" class="map-vm__divider"></div>
 
     <div v-if="hasMetrics" class="map-vm__metrics">
       <div v-if="cpuMetrics.length" class="map-vm__metrics-row">
@@ -485,11 +491,15 @@ defineExpose({ measure })
 /* Sits with the name rather than among the metric rows below: it identifies
    the box instead of reporting on it, so it needs no label of its own. Same
    treatment as a standalone container's host line (ContainerNode.vue). */
-.map-vm__ip {
+/* Identifiers that sit with the name rather than among the metric rows
+   below: they say what this box IS, not what it's doing. */
+.map-vm__sub {
   font-size: 0.58rem;
   color: #94a3b8;
   margin: -2px 0 2px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .map-vm__divider {

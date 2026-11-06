@@ -24,6 +24,7 @@ import {
 import { layoutExternals, EXTERNAL_ROW_GAP } from './externalLayout.js'
 import { usePanZoom } from './usePanZoom.js'
 import { basePrefix } from './apiBase.js'
+import { osLabels } from './osInfo.js'
 import UButton from '@nuxt/ui/components/Button.vue'
 import UCheckbox from '@nuxt/ui/components/Checkbox.vue'
 import USelect from '@nuxt/ui/components/Select.vue'
@@ -44,6 +45,7 @@ const hoverDimEnabled = ref(true)
 // Off by default: an address is reference material you go looking for, not
 // something worth a row on every box all the time.
 const showIp = ref(false)
+const showOs = ref(false)
 
 // The overflow menu behind the toolbar's "…" — settings that are worth
 // having but not worth the width of a permanent checkbox, and the one-off
@@ -54,6 +56,7 @@ const viewOptions = computed(() => [
   [
     { label: 'Dim unrelated on hover', model: hoverDimEnabled },
     { label: 'Show IP', model: showIp },
+    { label: 'Show OS', model: showOs },
   ].map(({ label, model }) => ({
     label,
     type: 'checkbox',
@@ -278,8 +281,14 @@ function onRecheckSizeContainer(containerId) {
 // re-measured when it appears or disappears. Boxes not currently mounted
 // (a container-granularity view, say) correct themselves on their next
 // mount, when their badges settle and report in.
-watch(showIp, () => {
+watch([showIp, showOs], () => {
   nextTick(() => Object.keys(realVmRefs).forEach(onRecheckSize))
+})
+
+// The OS line can only be drawn once its reading arrives, which is a beat
+// after the toggle — so the measurement is taken again when it lands.
+watch(osLabels, () => {
+  if (showOs.value) nextTick(() => Object.keys(realVmRefs).forEach(onRecheckSize))
 })
 
 // Grouping by server positions VMs topologically within their own server's
@@ -658,6 +667,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
                 v-if="up.kind === 'vm'"
                 :vm="up.vm"
                 :show-ip="showIp"
+                :show-os="showOs"
                 :x="up.x"
                 :y="up.y"
                 :ref="(el) => setRealVmRef(up.id, el)"
@@ -724,6 +734,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
               v-if="node.kind === 'vm'"
               :vm="node.vm"
               :show-ip="showIp"
+              :show-os="showOs"
               :x="node.x"
               :y="node.y"
               :ref="(el) => setRealVmRef(node.vm.id, el)"
@@ -789,7 +800,7 @@ const { view, dragging, onWheel, onPointerDown, onPointerMove, onPointerUp, zoom
          down once that's done; it's not kept around as a
          permanently-hidden duplicate of the real map. -->
     <div v-if="!initialSizesReady" class="map-calibration-pool" aria-hidden="true">
-      <VmBox v-for="vm in allVms" :key="vm.id" :vm="vm" :show-ip="showIp" :ref="(el) => setCalibrationRef(vm.id, el)" />
+      <VmBox v-for="vm in allVms" :key="vm.id" :vm="vm" :show-ip="showIp" :show-os="showOs" :ref="(el) => setCalibrationRef(vm.id, el)" />
       <ContainerNode
         v-for="c in allContainers"
         :key="c.id"
