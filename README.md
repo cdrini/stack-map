@@ -58,6 +58,41 @@ anchor, so it needs none of the recomputation below and can stay pointed at
 it's simply left out of the menu when absent, rather than shown disabled the
 way a missing `definition:` is.
 
+## Scripts
+
+`scripts/stackmap.py` reads and edits the spec; `scripts/collect-os.sh` goes
+out and gathers facts and hands them to it. The split is deliberate — only
+one of them knows the file format, and only one of them needs to reach the
+hosts — and neither carries anything site-specific, since the spec is the
+file that isn't committed.
+
+```sh
+scripts/stackmap.py vms                             # every VM id, one per line
+scripts/stackmap.py get ol-web0 ip                  # one scalar field
+scripts/stackmap.py set ol-web0 os=ubuntu           # set or add fields
+scripts/collect-os.sh --dry-run                     # ssh every VM, report
+scripts/collect-os.sh ol-web0 ol-db0                # or just these, and write
+```
+
+`stackmap.py` is standard library only, so it runs wherever `python3` does.
+It edits the spec as text rather than parsing and re-emitting YAML, which
+would flatten the comments that carry most of its documentation — the same
+reason `compose_refs.py` rewrites anchors line by line. Values that YAML
+would read back as something else are quoted, so an `osVersion` of `22.10`
+stays a string instead of becoming the float `22.1`.
+
+`collect-os.sh` resolves each VM to a hostname using the spec's own
+`config:` block, so no domain is baked into the repo:
+
+```yaml
+config:
+  domain: us.archive.org
+```
+
+Leave it out and the VM ids are used as hostnames directly;
+`STACKMAP_DOMAIN` overrides it either way, alongside `STACKMAP_SSH_USER`,
+`SSH_OPTS` and `STACKMAP_SPEC_PATH`.
+
 ## Keeping `definition:` anchors current
 
 A container's `definition:` links to the exact lines defining its service in

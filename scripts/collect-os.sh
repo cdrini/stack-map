@@ -11,15 +11,19 @@
 #
 # Environment:
 #   STACKMAP_SPEC_PATH  spec to read and update (passed through to stackmap.py)
-#   STACKMAP_DOMAIN     appended to each VM id to get a hostname
-#                       (default: us.archive.org; set empty to use ids as-is)
+#   STACKMAP_DOMAIN     appended to each VM id to get a hostname, overriding
+#                       the spec's `config: domain:`. Set empty to connect to
+#                       bare ids.
 #   STACKMAP_SSH_USER   ssh user, if not the one your ssh config picks
 #   SSH_OPTS            extra ssh options, word-split
 set -uo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 stackmap="$here/stackmap.py"
-domain=${STACKMAP_DOMAIN-us.archive.org}
+# Where the hostnames live is a property of the stack being mapped, not of
+# this script — so it comes from the spec, which is also the one file that
+# isn't committed. Nothing site-specific belongs in here.
+domain=${STACKMAP_DOMAIN-$("$stackmap" config domain 2>/dev/null || true)}
 dry_run=
 
 args=()

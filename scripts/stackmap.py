@@ -14,6 +14,7 @@ beneath them, which is how the spec is written throughout.
 
 Usage:
 
+    stackmap.py config domain              # a value from the spec's config block
     stackmap.py vms                        # every VM id, one per line
     stackmap.py get ol-web0                # that entity's scalar fields
     stackmap.py get ol-web0 ip             # just one
@@ -82,6 +83,25 @@ def section_bounds(lines: list[str], name: str) -> tuple[int, int]:
         if SECTION_RE.match(lines[i]):
             return start, i
     return start, len(lines)
+
+
+# A top-level mapping rather than a list of entities, so its fields sit one
+# indent in: `config:` / `  domain: ...`.
+CONFIG_RE = re.compile(r"^  (?P<key>[A-Za-z_][\w-]*): (?P<value>.+?)\s*$")
+
+
+def config(lines: list[str]) -> dict[str, str]:
+    """The spec's own `config:` block, or empty if it has none."""
+    try:
+        start, end = section_bounds(lines, "config")
+    except KeyError:
+        return {}
+    found = {}
+    for line in lines[start:end]:
+        match = CONFIG_RE.match(line)
+        if match:
+            found[match.group("key")] = match.group("value").strip('"')
+    return found
 
 
 def entity_ids(lines: list[str], section: str) -> list[str]:
@@ -195,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
     ids = sub.add_parser("vms", help="every VM id, one per line")
     ids.add_argument("--section", default="vms", choices=SECTIONS, help="list a different section instead")
 
+    conf = sub.add_parser("config", help="the spec's own config block")
+    conf.add_argument("key", nargs="?")
+
     get = sub.add_parser("get", help="an entity's scalar fields")
     get.add_argument("id")
     get.add_argument("field", nargs="?")
@@ -209,6 +232,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"stackmap: no spec at {args.spec}", file=sys.stderr)
         return 2
     lines = read_spec(args.spec)
+
+    if args.command == "config":
+        found = config(lines)
+        if args.key:
+            if args.key not in found:
+                return 1
+            print(found[args.key])
+        else:
+            for key, value in found.items():
+                print(f"{key}={value}")
+        return 0
 
     if args.command == "vms":
         for entity_id in entity_ids(lines, args.section):
