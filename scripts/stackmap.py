@@ -228,6 +228,12 @@ def main(argv: list[str] | None = None) -> int:
     put.add_argument("--dry-run", action="store_true", help="report the change without writing")
 
     args = parser.parse_args(argv)
+    # This script's stdout is an interface for other scripts, so it emits
+    # LF whatever the platform. Left alone, Windows turns every print into
+    # CRLF and a shell reading `vms` ends up with ids carrying a trailing
+    # \r — which then shows up appended to a hostname, or overwriting the
+    # line it was echoed on.
+    sys.stdout.reconfigure(newline="\n")
     if not args.spec.is_file():
         print(f"stackmap: no spec at {args.spec}", file=sys.stderr)
         return 2

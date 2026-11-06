@@ -23,7 +23,7 @@ stackmap="$here/stackmap.py"
 # Where the hostnames live is a property of the stack being mapped, not of
 # this script — so it comes from the spec, which is also the one file that
 # isn't committed. Nothing site-specific belongs in here.
-domain=${STACKMAP_DOMAIN-$("$stackmap" config domain 2>/dev/null || true)}
+domain=${STACKMAP_DOMAIN-$("$stackmap" config domain 2>/dev/null | tr -d '\r')}
 dry_run=
 
 args=()
@@ -43,7 +43,7 @@ for arg in "$@"; do
 done
 
 if [ ${#args[@]} -eq 0 ]; then
-  mapfile -t args < <("$stackmap" vms)
+  mapfile -t args < <("$stackmap" vms | tr -d '\r')
 fi
 if [ ${#args[@]} -eq 0 ]; then
   echo "collect-os: no VMs to visit" >&2
