@@ -10,7 +10,7 @@ import {
 } from './metrics.js'
 import { stackMenuItems } from './stackMenu.js'
 import { openVmInfo } from './vmInfo.js'
-import { osLabel, loadOs } from './osInfo.js'
+import { osLabel, osIcon, isEol, loadOs, loadOsReleases } from './osInfo.js'
 import UContextMenu from '@nuxt/ui/components/ContextMenu.vue'
 import MetricBadge from './MetricBadge.vue'
 import CpuBadge from './CpuBadge.vue'
@@ -127,7 +127,17 @@ const hasCriticalMetric = computed(() => criticalStatuses.value.size > 0)
 // Only asked for when the line is actually shown — see osInfo.js, which
 // keeps the answer rather than re-fetching it on every refresh.
 const os = computed(() => osLabel(props.vm))
-watch(() => props.showOs, (on) => on && loadOs(props.vm), { immediate: true })
+const icon = computed(() => osIcon(props.vm))
+const eol = computed(() => isEol(props.vm))
+watch(
+  () => props.showOs,
+  (on) => {
+    if (!on) return
+    loadOs(props.vm)
+    loadOsReleases()
+  },
+  { immediate: true }
+)
 
 const allContainersDimmed = computed(
   () => props.attachedContainerIds && props.vm.containers.every((c) => !props.attachedContainerIds.has(c.id))
@@ -248,7 +258,10 @@ defineExpose({ measure })
       <span v-if="vm.role" class="map-vm__role">{{ vm.role }}</span>
     </div>
     <div v-if="showIp && vm.ip" class="map-vm__sub">{{ vm.ip }}</div>
-    <div v-if="showOs && os" class="map-vm__sub">{{ os }}</div>
+    <div v-if="showOs && os" class="map-vm__sub">
+      <img v-if="icon" class="map-vm__os-icon" :src="icon" :alt="vm.os" />{{ os }}
+      <span v-if="eol" class="map-vm__eol" title="past its end-of-life date">EOL</span>
+    </div>
     <div v-if="(showIp && vm.ip) || (showOs && os)" class="map-vm__divider"></div>
 
     <div v-if="hasMetrics" class="map-vm__metrics">
@@ -500,6 +513,31 @@ defineExpose({ measure })
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.map-vm__os-icon {
+  /* Tailwind's preflight makes images block-level; this sits in a line of
+     text. */
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 3px;
+  object-fit: contain;
+  vertical-align: -1px;
+}
+
+/* The same orange the metric badges use for "worth knowing", not the red
+   they keep for "acting now" — an unsupported release is a thing to plan
+   around rather than an outage. */
+.map-vm__eol {
+  margin-left: 3px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 0.5rem;
+  font-weight: 700;
+  color: #9a3412;
+  background: #ffedd5;
+  vertical-align: 1px;
 }
 
 .map-vm__divider {

@@ -18,6 +18,7 @@ VMs, metric types, or the templating at all.
 
 import asyncio
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -161,6 +162,60 @@ class ComposeCache:
 compose_cache = ComposeCache()
 
 
+# Release and end-of-life dates come from endoflife.date, which is a public
+# dataset rather than anything of ours. Cached here instead of in the
+# browser so one fetch serves every viewer, and so the page never calls a
+# third party itself — the same arrangement ComposeCache has with GitHub,
+# for the same reasons.
+EOL_API = "https://endoflife.date/api/v1/products"
+# Release dates move when a distro ships a point release or revises an EOL;
+# neither is news within a day.
+EOL_TTL_SECONDS = 24 * 3600
+EOL_RETRY_SECONDS = 600
+# A product name goes into a URL path, and it arrives from the client (it's
+# whatever `os` the spec records). Anything outside this charset is refused
+# rather than escaped, since no real product name needs more.
+EOL_PRODUCT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+# All the frontend shows; the rest of each release is noise to it.
+EOL_FIELDS = ("name", "label", "codename", "releaseDate", "eolFrom", "ltsFrom", "isLts", "isEol", "isMaintained")
+
+
+class EolCache:
+    """endoflife.date releases per product, refetched at most once per TTL."""
+
+    def __init__(self):
+        self._releases: dict[str, list[dict]] = {}
+        self._valid_until: dict[str, float] = {}
+        self._lock = asyncio.Lock()
+
+    async def get(self, product: str) -> list[dict] | None:
+        """That product's releases, or None if they've never been fetched."""
+        if time.monotonic() < self._valid_until.get(product, 0):
+            return self._releases.get(product)
+        async with self._lock:
+            if time.monotonic() < self._valid_until.get(product, 0):
+                return self._releases.get(product)
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(f"{EOL_API}/{product}/")
+                    response.raise_for_status()
+                releases = response.json()["result"]["releases"]
+                self._releases[product] = [
+                    {k: r.get(k) for k in EOL_FIELDS} for r in releases
+                ]
+                self._valid_until[product] = time.monotonic() + EOL_TTL_SECONDS
+            except Exception as e:
+                # An unknown product 404s here, which is indistinguishable
+                # from a transient failure and treated the same: nothing to
+                # show, asked again later.
+                self._valid_until[product] = time.monotonic() + EOL_RETRY_SECONDS
+                log.warning("end-of-life lookup failed for %s: %s", product, e)
+        return self._releases.get(product)
+
+
+eol_cache = EolCache()
+
+
 # How far back both endpoints below fetch — the map's "rewind" timeline
 # (src/RewindTimeline.vue) looks back through this window locally instead
 # of firing a fresh request per rewind point (see metrics.js's
@@ -222,6 +277,25 @@ async def spec_definitions():
         log.warning("could not resolve definition anchors: %s", e)
         return {}
     return {d.container: d.url for d in definitions if d.block is not None}
+
+
+@router.get("/api/os-releases")
+async def os_releases(product: list[str] = Query(...)):
+    """Release and end-of-life dates for one or more OS products, keyed by
+    product — e.g. GET /api/os-releases?product=debian&product=ubuntu.
+
+    The frontend asks for the distinct `os` values its VMs record, which is
+    a handful however large the fleet is, since the data is per product
+    rather than per version. A product with nothing to say maps to `null`
+    rather than failing the request, the same way an unresolvable Graphite
+    target does.
+    """
+    result = {}
+    for name in product:
+        if not EOL_PRODUCT_RE.match(name):
+            raise HTTPException(status_code=400, detail=f"not a product name: {name}")
+        result[name] = await eol_cache.get(name)
+    return result
 
 
 @router.get("/api/metrics/latest")
